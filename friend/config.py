@@ -6,6 +6,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+HARNESS = Path(__file__).resolve().parent
+KIT = HARNESS / "testkit"
+
+
+def rel_or_abs(root: Path, p: Path) -> str:
+    """Path relative to the project root when inside it, else absolute."""
+    try:
+        return str(p.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(p.resolve())
+
+
 class ConfigError(Exception):
     pass
 
@@ -44,6 +56,13 @@ class Config:
 
     def path(self, rel: str) -> Path:
         return self.root / rel
+
+    def runner(self) -> list[str]:
+        """The test runner command, rooted at this project (the harness may live elsewhere)."""
+        return ["python3", rel_or_abs(self.root, KIT / "runner.py"), "--root", "."]
+
+    def suite_cmd(self, suite: str | None = None) -> list[str]:
+        return self.runner() + ["--suite", suite or self.tests_dir]
 
 
 def load(root: Path) -> Config:
