@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "friend-cli"
+version = "0.3.0"
+description = "Describe an app, get interviewed, approve a spec, and get independently tested implementations (drives Claude Code)."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+friend = "friend.cli:main"
+
+[tool.setuptools]
+packages = ["friend"]
+
+[tool.setuptools.package-data]
+friend = ["prompts/*.md", "templates/*", "templates/**/*", "testkit/*.py", "testkit/*.md", "selftest/*.py"]
