@@ -94,3 +94,7 @@ def load(root: Path) -> Config:
         if not isinstance(svc.get("launch"), list) or not isinstance(svc.get("ready"), str):
             raise ConfigError(f"friend.toml [services.{name}]: needs launch = [...] and ready = \"regex\"")
     return Config(root, raw)
+
+
+def expand(argv: list[str] | None, d: str) -> list[str] | None:
+    return None if argv is None else [a.replace("{dir}", d) for a in argv]
