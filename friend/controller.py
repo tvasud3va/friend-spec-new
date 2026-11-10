@@ -4,7 +4,9 @@
 
   plan    planner proposes targets → deterministic validation (retries) → plan.json
   tests   tester writes the suite → gates: imports, rule coverage, untestable limit, vacuity (fix rounds)
-  build   prepare → implement → checking (build, suite, static gates) → passed|failed|blocked
+  build   prepare → implement → checking (build, suite, static gates) → repairing … → passed|failed|blocked
+          disputed failing tests → arbiter → test_wrong: tester fixes test, suite re-gated and re-approved,
+          every target re-checked | code_wrong: back to repair | spec_ambiguous: blocked
 
 Every transition is persisted before the next action, so `generate` can resume after any crash.
 """
@@ -339,7 +341,8 @@ class Controller:
                 "launch": " ".join(expand(t["launch"], t["dir"])),
                 "build": " ".join(expand(t["build"], t["dir"])) if t.get("build") else "(none)",
                 "header": t["header"], "sources": ", ".join(t["sources"]),
-                "test_cmd": " ".join(self.cfg.suite_cmd() + ["--target", name])}
+                "test_cmd": " ".join(self.cfg.suite_cmd() + ["--target", name]),
+                "max_rounds": self.cfg["workflow"]["max_repairs"]}
 
     def continue_prompt(self, name: str, t: dict) -> str:
         existing = checks.snapshot(self.root / t["dir"])
@@ -348,7 +351,7 @@ class Controller:
                       last_failures=("Most recent check failures:\n\n" + format_failures(last["failures"])) if last and last["failures"] else "")
 
     def drive_build(self, name: str, t: dict) -> None:
-        r, task = self.run, f"build:{name}"
+        r, task, w = self.run, f"build:{name}", self.cfg["workflow"]
         ts = r.t(task)
         role = roles.builder(self.cfg, name, t)
         while (st := ts["status"]) not in TERMINAL:
@@ -359,12 +362,15 @@ class Controller:
                 d.mkdir(parents=True)
                 r.emit("step.finished", task=task, step="prepare", detail=f"cleaned {t['dir']}/")
                 r.set(task, status="implementing", session_id=str(uuid.uuid4()), session_started=False, attempts=0)
-            elif st == "implementing":
-                if ts["attempts"] > 0 or ts["session_started"]:
+            elif st in ("implementing", "repairing"):
+                if ts["attempts"] > 0 or (st == "implementing" and ts["session_started"]):
                     text = self.continue_prompt(name, t)
-                else:
+                elif st == "implementing":
                     text = prompt("implement", **self.build_vars(name, t))
-                res = self.agent_step(task, role, text, ts["session_started"], f"{name}-{st}-{ts['attempts']}")
+                else:
+                    text = prompt("repair", **self.build_vars(name, t), round=ts["repairs"],
+                                  failures=format_failures(ts["last_checks"]["failures"]))
+                res = self.agent_step(task, role, text, ts["session_started"], f"{name}-{st}-{ts['repairs']}-{ts['attempts']}")
                 if self.crashed(task, res):
                     continue
                 out = res.output or {}
@@ -378,8 +384,14 @@ class Controller:
                 if not failures:
                     self.finish_target(name, t)
                     r.set(task, status="passed")
+                    continue
+                disputed = self.disputes_for(name, failures)
+                if disputed and r.state["disputes_used"] < w["max_disputes"]:
+                    self.arbitrate(name, t, disputed, failures)
+                elif ts["repairs"] < w["max_repairs"]:
+                    r.set(task, status="repairing", repairs=ts["repairs"] + 1, attempts=0)
                 else:
-                    r.set(task, status="failed", error=f"{len(failures)} checks failing")
+                    r.set(task, status="failed", error=f"checks still failing after {w['max_repairs']} repairs")
 
     def check_target(self, name: str, t: dict) -> list[dict]:
         r, task = self.run, f"build:{name}"
@@ -406,6 +418,74 @@ class Controller:
             "run_id": st["run_id"], "spec_hash": st["spec_hash"], "plan_hash": approvals.load(self.cfg)["plan"]["hash"],
             "tests_hash": approvals.load(self.cfg)["tests"]["hash"], "session_id": ts["session_id"], "model": ts["model"],
             "agent_cli": st["versions"]["agent_cli"], "toolchain": st["versions"]["toolchain"], "generated_at": st["updated"]})
+
+    def disputes_for(self, name: str, failures: list[dict]) -> list[dict]:
+        out = self.run.t(f"build:{name}").get("last_output") or {}
+        failing = {f.get("test", f["name"]) for f in failures} | {f["name"] for f in failures}
+        return [d for d in out.get("test_disputes") or [] if d.get("test") in failing]
+
+    # ── arbitration ──
+    def arbitrate(self, name: str, t: dict, disputes: list[dict], failures: list[dict]) -> None:
+        r, task = self.run, f"build:{name}"
+        r.state["disputes_used"] += 1
+        r.emit("dispute.opened", task=task, tests=[d["test"] for d in disputes])
+        details = []
+        for d in disputes:
+            f = next((f for f in failures if f.get("test", f["name"]) == d["test"] or f["name"] == d["test"]), {})
+            details.append(f"### {d['test']} (rules: {', '.join(d.get('rules', []))})\nImplementer's reason: {d['reason']}\n"
+                           f"Failure output:\n```\n{f.get('detail', '')[:1200]}\n```")
+        r.set("arbitrate", status="working", session_id=str(uuid.uuid4()), session_started=False, attempts=0)
+        text = prompt("arbiter", spec_hash=r.state["spec_hash"], tests_dir=self.cfg.tests_dir, target=name,
+                      spec_files=", ".join(f"`{p.relative_to(self.root)}`" for p in behaviour_spec_files(self.root, self.cfg.spec_dir)),
+                      disputes="\n\n".join(details))
+        res = self.agent_step("arbitrate", roles.arbiter(self.cfg), text, False, f"arbitrate-{r.state['disputes_used']}")
+        verdicts = (res.output or {}).get("verdicts") or []
+        r.set("arbitrate", status="done")
+        r.emit("dispute.verdicts", task=task, verdicts=verdicts)
+        wrong_tests = [v for v in verdicts if v["verdict"] == "test_wrong"]
+        ambiguous = [v for v in verdicts if v["verdict"] == "spec_ambiguous"]
+        if ambiguous:
+            q = [{"rule": ",".join(v.get("rules", [])), "question": v.get("fix") or v["explanation"], "blocking": True} for v in ambiguous]
+            r.t(task)["questions"] += q
+            r.emit("spec.questions", task=task, questions=q)
+            r.set(task, status="blocked", error="arbiter found the spec ambiguous for disputed tests")
+            return
+        if wrong_tests:
+            self.amend_tests(wrong_tests)
+            return
+        # every dispute was rejected: the code must change; give the builder the arbiter's reasoning
+        ts = r.t(task)
+        for v in verdicts:
+            for f in ts["last_checks"]["failures"]:
+                if f.get("test", f["name"]) == v["test"]:
+                    f["detail"] += f"\n\nARBITER (test is correct): {v['explanation']}"
+        ts["last_output"] = {**(ts["last_output"] or {}), "test_disputes": []}
+        if ts["repairs"] < self.cfg["workflow"]["max_repairs"]:
+            r.set(task, status="repairing", repairs=ts["repairs"] + 1, attempts=0)
+        else:
+            r.set(task, status="failed", error="disputes rejected and repairs exhausted")
+
+    def amend_tests(self, verdicts: list[dict]) -> None:
+        r, ts = self.run, self.run.t("tests")
+        problems = "\n\n".join(f"### {v['test']} is wrong (rules: {', '.join(v.get('rules', []))})\n{v['explanation']}\n\nRequired change: {v.get('fix', '')}"
+                               for v in verdicts)
+        r.set("tests", status="fixing", rounds=ts["rounds"] + 1, attempts=0)
+        resume = bool(ts["session_id"]) and ts["session_started"]
+        if not resume:
+            r.set("tests", session_id=str(uuid.uuid4()))
+        res = self.agent_step("tests", roles.tester(self.cfg), prompt("tester_fix", **self.tests_vars(), round=ts["rounds"], problems=problems),
+                              resume, f"tests-amend-{r.state['disputes_used']}")
+        out = res.output or {}
+        failures = self.check_tests(out.get("untestable") or (self.tests_manifest() or {}).get("untestable") or [])
+        if failures:
+            r.set("tests", status="failed", error="amended test suite fails its gates")
+            raise Stop("failed")
+        approvals.approve(self.cfg, "tests", by="arbitration", note="; ".join(v["test"] for v in verdicts))
+        r.set("tests", status="done")
+        r.emit("tests.amended", tests=[v["test"] for v in verdicts])
+        for task, s in r.state["tasks"].items():   # every target is re-judged by the amended suite
+            if task.startswith("build:") and s["status"] in ("passed", "checking"):
+                r.set(task, status="checking")
 
 
 def preflight(cfg: Config) -> tuple[dict, list[str]]:

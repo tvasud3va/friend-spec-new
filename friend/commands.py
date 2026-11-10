@@ -90,6 +90,12 @@ def human(ev: dict, verbose: bool) -> str | None:
             return f"{p}approved {ev['artifact']} ({ev['by']})"
         case "plan.written":
             return f"[plan] targets: {', '.join(ev['targets'])}"
+        case "dispute.opened":
+            return f"{p}  ⚖ dispute: {', '.join(ev['tests'])}"
+        case "dispute.verdicts":
+            return "\n".join(f"{p}  ⚖ {v['test']}: {v['verdict']} — {v['explanation'][:160]}" for v in ev["verdicts"])
+        case "tests.amended":
+            return f"[tests] amended after arbitration: {', '.join(ev['tests'])}; all targets will be re-checked"
         case "run.finished":
             return f"== run {ev['run']} {ev['status'].upper()} · ${ev['cost_usd']} · " + ", ".join(f"{k}={v}" for k, v in ev["tasks"].items())
         case "approval.rejected":
@@ -219,6 +225,7 @@ def cmd_status(args, cfg) -> int:
     for name, t in s.get("tasks", {}).items():
         lc = t.get("last_checks")
         extra = f"  checks {lc.get('passed', '-')} passed / {lc['failed']} failing" if lc else ""
+        extra += f"  repairs {t['repairs']}" if t.get("repairs") else ""
         print(f"  {name:20} {t['status']:18}{extra}" + (f"  error: {t['error']}" if t.get("error") else ""))
         for q in t.get("questions", []):
             print(f"  {'':20} ? {'BLOCKING ' if q.get('blocking') else ''}{q.get('rule', '')} {q['question'][:150]}")

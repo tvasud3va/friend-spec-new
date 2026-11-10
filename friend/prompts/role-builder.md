@@ -8,3 +8,5 @@ Role: **builder**. You implement one target. A hidden black-box test suite will 
 - **Dependencies:** only what the platform spec allows. No package installs, no network.
 - **Self-check:** build, then run the test command from the task. It is a black box: read its
   output, not its source. Fix failures by re-reading the spec, never by special-casing test names.
+- **Disputes:** if you are confident a failing test contradicts the spec, keep your spec-correct code
+  and list the test in `test_disputes`, quoting the rule text it contradicts. An arbiter will decide.

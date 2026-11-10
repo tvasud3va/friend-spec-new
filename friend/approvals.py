@@ -79,6 +79,8 @@ def approve(cfg: Config, kind: str, by: str, note: str = "") -> dict:
         rec["note"] = note
     if kind != "spec":
         rec["spec_hash"] = data["spec"]["hash"]
+        if kind == "tests" and by == "arbitration" and data.get("tests"):
+            rec["amendments"] = data["tests"].get("amendments", []) + [{"at": rec["approved_at"], "note": note}]
     data[kind] = rec
     save(cfg, data)
     return rec

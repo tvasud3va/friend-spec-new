@@ -27,8 +27,9 @@ import time
 from pathlib import Path
 
 DEFAULTS = {
-    "builder": {"status": "complete", "summary": "done", "spec_questions": []},
+    "builder": {"status": "complete", "summary": "done", "spec_questions": [], "test_disputes": []},
     "tester": {"status": "complete", "summary": "done", "untestable": [], "spec_questions": []},
+    "arbiter": {"verdicts": []},
     "planner": {"targets": [], "spec_questions": []},
 }
 

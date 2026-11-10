@@ -26,7 +26,7 @@ def write_atomic(path: Path, data: str) -> None:
 
 
 def new_task() -> dict:
-    return {"status": "pending", "session_id": None, "session_started": False, "attempts": 0,
+    return {"status": "pending", "session_id": None, "session_started": False, "attempts": 0, "repairs": 0,
             "rounds": 0, "last_checks": None, "last_output": None, "questions": [], "error": None, "model": None}
 
 
@@ -42,7 +42,7 @@ class Run:
         run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
         state = {"run_id": run_id, "created": now(), "updated": now(), "status": "running",
                  "spec_hash": spec_hash, "config_hash": config_hash, "versions": versions, "cost_usd": 0.0,
-                 "resumed": 0, "tasks": {"plan": new_task(), "tests": new_task()}}
+                 "disputes_used": 0, "resumed": 0, "tasks": {"plan": new_task(), "tests": new_task()}}
         run = cls(mf_dir / "runs" / run_id, state, sink)
         run.save()
         write_atomic(mf_dir / "latest", run_id)

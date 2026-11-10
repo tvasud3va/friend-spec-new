@@ -6,6 +6,7 @@ the plan, so nothing here names a project-specific directory.
   planner   reads spec                 writes nothing (structured output)   → target plan
   tester    reads spec + testkit docs  writes the generated test suite      → tests
   builder   reads spec + its target    writes its target directory          → one implementation
+  arbiter   reads spec + tests         writes nothing                       → verdicts on test disputes
 """
 from __future__ import annotations
 
@@ -42,10 +43,21 @@ SCHEMAS = {
         "untestable": {"type": "array", "items": {"type": "object", "required": ["rule", "reason"], "properties": {
             "rule": {"type": "string"}, "reason": {"type": "string"}}}},
         "spec_questions": QUESTIONS}},
-    "builder": {"type": "object", "required": ["status", "summary", "spec_questions"], "properties": {
+    "builder": {"type": "object", "required": ["status", "summary", "spec_questions", "test_disputes"], "properties": {
         "status": {"type": "string", "enum": ["complete", "blocked"]},
         "summary": {"type": "string"},
-        "spec_questions": QUESTIONS}},
+        "spec_questions": QUESTIONS,
+        "test_disputes": {"type": "array", "description": "failing tests you believe contradict the spec", "items": {
+            "type": "object", "required": ["test", "rules", "reason"], "properties": {
+                "test": {"type": "string"}, "rules": {"type": "array", "items": {"type": "string"}},
+                "reason": {"type": "string", "description": "which rule text the test contradicts, quoted"}}}}}},
+    "arbiter": {"type": "object", "required": ["verdicts"], "properties": {
+        "verdicts": {"type": "array", "items": {"type": "object", "required": ["test", "verdict", "explanation"], "properties": {
+            "test": {"type": "string"},
+            "verdict": {"type": "string", "enum": ["test_wrong", "code_wrong", "spec_ambiguous"]},
+            "rules": {"type": "array", "items": {"type": "string"}},
+            "explanation": {"type": "string"},
+            "fix": {"type": "string", "description": "for test_wrong: exactly what the test must assert instead; for spec_ambiguous: the question"}}}}}},
 }
 
 
@@ -107,4 +119,8 @@ def builder(cfg: Config, name: str, target: dict) -> Role:
     launch = expand(target["launch"], d)
     execs.append(f"{launch[0]} {d}/" if not launch[0].startswith(d) else launch[0])
     return Role("builder", f"build:{name}", WRITER, write=[d], read=[cfg.spec_dir], execs=execs)
+
+
+def arbiter(cfg: Config) -> Role:
+    return Role("arbiter", "arbitrate", READ_ONLY, read=[cfg.spec_dir, cfg.tests_dir])
 

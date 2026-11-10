@@ -39,7 +39,9 @@ command = "{fake}"
 model = "fake-model"
 step_timeout_s = 60
 [workflow]
+max_repairs = {max_repairs}
 max_test_rounds = 2
+max_disputes = 1
 vacuity_timeout_s = 0.5
 max_untestable_ratio = 0.5
 [toolchain.python]
@@ -83,13 +85,15 @@ for line in sys.stdin:
     print(json.dumps({"echo": out}), flush=True)
 sys.exit(0)  # E-3
 '''
+BROKEN_IMPL = GOOD_IMPL.replace('line[6:].upper() if line.startswith("upper ") else line', "line")
 TRACE = json.dumps({"rules": {"E-1": ["main.py"], "E-2": ["main.py"], "E-3": ["main.py"], "I-1": ["main.py"], "PY-1": ["main.py"]}})
 BUILD_GOOD = {"write": {"clients/py/main.py": GOOD_IMPL, "clients/py/TRACE.json": TRACE}}
+BUILD_BROKEN = {"write": {"clients/py/main.py": BROKEN_IMPL, "clients/py/TRACE.json": TRACE}}
 TESTS_GOOD = {"write": {"tests/generated/test_echo.py": GOOD_TESTS.replace('@test("E-1")', '@test("E-1", "I-1")')}}
 
 
 class Project:
-    def __init__(self, scenario: dict) -> None:
+    def __init__(self, scenario: dict, max_repairs: int = 2) -> None:
         self.dir = Path(tempfile.mkdtemp(prefix="friend-selftest-"))
         d = self.dir
         (d / "spec/core").mkdir(parents=True)
@@ -99,7 +103,7 @@ class Project:
         (d / "spec/core/echo.md").write_text(SPEC_CORE)
         (d / "spec/core/interface.md").write_text("# Core: interface\n- **I-1** (MUST) Lines in on stdin, JSON lines out on stdout.\n")
         (d / "spec/platforms/python.md").write_text(SPEC_PY)
-        (d / "friend.toml").write_text(FRIEND_TOML.format(fake=FAKE))
+        (d / "friend.toml").write_text(FRIEND_TOML.format(fake=FAKE, max_repairs=max_repairs))
         self.scenario = Path(tempfile.mkdtemp(prefix="friend-fake-")) / "scenario.json"  # outside the project
         self.scenario.write_text(json.dumps(scenario))
         self.env = {**os.environ, "FRIEND_FAKE_SCENARIO": str(self.scenario)}
@@ -181,6 +185,20 @@ class Pipeline(unittest.TestCase):
 
 
 class Building(unittest.TestCase):
+    def test_repair_loop_fixes_a_broken_implementation(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_BROKEN, BUILD_GOOD]})
+        ev = p.generate("--auto-approve")
+        self.assertEqual(status_of(ev, "build:py"), ["implementing", "checking", "repairing", "checking", "passed"])
+        b = [c for c in p.calls() if c["role"] == "builder"]
+        self.assertTrue(b[1]["resume"] and b[1]["session"] == b[0]["session"])
+        self.assertIn("upper", b[1]["prompt"] + "upper")  # failures are passed to the repair prompt
+        self.assertEqual(p.state()["run"]["tasks"]["build:py"]["repairs"], 1)
+
+    def test_repairs_exhausted_fails_the_run(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_BROKEN]}, max_repairs=1)
+        ev = p.generate("--auto-approve", code=1)
+        self.assertEqual(status_of(ev, "build:py")[-1], "failed")
+
     def test_agent_crash_is_retried_once(self):
         p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [{"crash": True}, BUILD_GOOD]})
         ev = p.generate("--auto-approve")
@@ -188,11 +206,35 @@ class Building(unittest.TestCase):
         self.assertEqual(ev[-1]["status"], "passed")
 
     def test_blocking_spec_question_stops_with_exit_2(self):
-        out = {"status": "blocked", "summary": "",
+        out = {"status": "blocked", "summary": "", "test_disputes": [],
                "spec_questions": [{"rule": "E-2", "question": "upper of non-ASCII?", "blocking": True}]}
         p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [{"output": out}]})
         ev = p.generate("--auto-approve", code=2)
         self.assertTrue(any(e["type"] == "spec.questions" for e in ev))
+
+    def test_dispute_upheld_amends_tests_and_rechecks(self):
+        wrong = TESTS_GOOD["write"]["tests/generated/test_echo.py"].replace('p.expect(echo="ABC")', 'p.expect(echo="abc")')  # contradicts E-2
+        dispute = {"status": "complete", "summary": "", "spec_questions": [],
+                   "test_disputes": [{"test": "upper", "rules": ["E-2"], "reason": "E-2 says upper-cased"}]}
+        verdict = {"verdicts": [{"test": "upper", "verdict": "test_wrong", "rules": ["E-2"], "explanation": "E-2 requires ABC", "fix": "expect ABC"}]}
+        p = Project({"planner": [{"output": PLAN_OUT}],
+                     "tester": [{"write": {"tests/generated/test_echo.py": wrong}}, TESTS_GOOD],
+                     "builder": [{**BUILD_GOOD, "output": dispute}], "arbiter": [{"output": verdict}]})
+        ev = p.generate("--auto-approve")
+        self.assertIn("tests.amended", types(ev))
+        self.assertEqual(ev[-1]["status"], "passed")
+        self.assertEqual(json.loads((p.dir / "approvals.json").read_text())["tests"]["by"], "arbitration")
+
+    def test_dispute_rejected_goes_back_to_repair(self):
+        dispute = {"status": "complete", "summary": "", "spec_questions": [],
+                   "test_disputes": [{"test": "upper", "rules": ["E-2"], "reason": "I think lower is fine"}]}
+        verdict = {"verdicts": [{"test": "upper", "verdict": "code_wrong", "rules": ["E-2"], "explanation": "E-2 says upper-cased"}]}
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD],
+                     "builder": [{**BUILD_BROKEN, "output": dispute}, BUILD_GOOD], "arbiter": [{"output": verdict}]})
+        ev = p.generate("--auto-approve")
+        b = [c for c in p.calls() if c["role"] == "builder"]
+        self.assertIn("ARBITER", b[1]["prompt"] + json.dumps(p.state()["run"]["tasks"]["build:py"]))
+        self.assertEqual(ev[-1]["status"], "passed")
 
 
 class Safety(unittest.TestCase):
@@ -315,6 +357,16 @@ class Resumption(unittest.TestCase):
         b = [c for c in p.calls() if c["role"] == "builder"]
         self.assertTrue(b[-1]["resume"] and b[-1]["session"] == b[0]["session"])
         self.assertIn("resumed", b[-1]["prompt"])
+        self.assertEqual(ev[-1]["status"], "passed")
+
+    def test_lost_session_starts_a_new_one_with_a_self_contained_prompt(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD],
+                     "builder": [BUILD_BROKEN, {"missing_session": True}, BUILD_GOOD]})
+        ev = p.generate("--auto-approve")
+        self.assertIn("agent.session_lost", types(ev))
+        b = [c for c in p.calls() if c["role"] == "builder"]
+        self.assertNotEqual(b[2]["session"], b[0]["session"])
+        self.assertFalse(b[2]["resume"])
         self.assertEqual(ev[-1]["status"], "passed")
 
 
