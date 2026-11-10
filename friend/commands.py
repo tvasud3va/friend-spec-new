@@ -2,7 +2,8 @@
 """friend: describe an app, approve a spec, get independently tested implementations.
 
 Start here:
-  friend spec approve            lint the spec (spec/, next to friend.toml) and record what you approved
+  friend init                    scaffold a project, then write the spec in spec/ (format: spec/README.md)
+  friend spec approve            lint the spec and record what you approved
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
 
 More:
@@ -27,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import approvals  # noqa: E402
 from config import ConfigError, load  # noqa: E402
 from controller import Controller, config_hash, preflight  # noqa: E402
+import project  # noqa: E402
 from runstate import Run  # noqa: E402
 from speclib import lint  # noqa: E402
 
@@ -237,6 +239,10 @@ def cmd_status(args, cfg) -> int:
     return 0
 
 
+def cmd_init(args, root: Path) -> int:
+    return project.init(root, args.name, args.describe, args.lang or [], install=not args.no_install, force=args.force)
+
+
 def cmd_spec(args, cfg) -> int:
     if args.spec_cmd == "lint":
         problems = lint(cfg.root, cfg.spec_dir)
@@ -253,6 +259,12 @@ def main() -> int:
     ap.add_argument("--root", default=None, help="project root (default: nearest directory upwards containing friend.toml)")
     ap.add_argument("--json", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    i = sub.add_parser("init", help="scaffold a project in the current directory")
+    i.add_argument("--name")
+    i.add_argument("--describe", help="what you are building (written to spec/BRIEF.md)")
+    i.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
+    i.add_argument("--no-install", action="store_true", help="don't run npm for the TypeScript compiler")
+    i.add_argument("--force", action="store_true")
     sp = sub.add_parser("spec")
     ssub = sp.add_subparsers(dest="spec_cmd", required=True)
     sl = ssub.add_parser("lint")
@@ -265,12 +277,14 @@ def main() -> int:
     g.add_argument("-v", "--verbose", action="store_true")
     s = sub.add_parser("status")
     s.add_argument("--run")
-    for p in (a, g, s, sl, sa):
+    for p in (a, g, s, i, sl, sa):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.cmd == "init":
+        return cmd_init(args, Path(args.root).resolve() if args.root else Path.cwd())
     root = Path(args.root).resolve() if args.root else find_root(Path.cwd())
     if not (root / "friend.toml").exists():
-        print(f"no friend.toml in {root} or any parent directory", file=sys.stderr)
+        print(f"no friend.toml in {root} or any parent directory. Start a project with `friend init`.", file=sys.stderr)
         return 3
     try:
         cfg = load(root)

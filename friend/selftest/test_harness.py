@@ -270,6 +270,45 @@ class Safety(unittest.TestCase):
         self.assertEqual((st["plan"]["status"], st["tests"]["status"]), ("stale", "stale"))
 
 
+def run_mf(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(MF + list(args), cwd=cwd, capture_output=True, text=True, env=env or os.environ, timeout=300)
+
+
+class NewUserFlow(unittest.TestCase):
+    """init → spec → approve, as a new user would run them."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="friend-newuser-"))
+        self.scenario = Path(tempfile.mkdtemp(prefix="friend-fake-")) / "scenario.json"
+        self.env = {**os.environ, "FRIEND_FAKE_SCENARIO": str(self.scenario)}
+
+    def init(self) -> None:
+        r = run_mf(self.dir, "init", "--name", "echo", "--describe", "an echo tool", "--lang", "python", "--no-install")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        toml = (self.dir / "friend.toml").read_text().replace('command = "claude"', f'command = "{FAKE}"')
+        (self.dir / "friend.toml").write_text(toml)
+
+    def test_init_scaffolds_a_loadable_project(self):
+        self.init()
+        for f in ("friend.toml", "spec/README.md", "spec/BRIEF.md", "spec/platforms/python.md", ".gitignore"):
+            self.assertTrue((self.dir / f).exists(), f)
+        self.assertIn("an echo tool", (self.dir / "spec/BRIEF.md").read_text())
+        self.assertIn("app/python/main.py", (self.dir / "spec/platforms/python.md").read_text())
+        r = run_mf(self.dir / "spec", "status")                    # found from a subdirectory
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(run_mf(self.dir, "init", "--lang", "python").returncode, 3)  # refuses to clobber
+        r = run_mf(Path(tempfile.mkdtemp()), "status")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("friend init", r.stderr)
+
+    def test_lint_requires_an_interface_file(self):
+        self.init()
+        (self.dir / "spec/core/echo.md").write_text(SPEC_CORE)
+        r = run_mf(self.dir, "spec", "approve")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("interface", r.stderr)
+
+
 class Operations(unittest.TestCase):
     def test_reviewer_rejection_regenerates_with_feedback(self):
         p = Project({"planner": [{"output": PLAN_OUT}, {"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})

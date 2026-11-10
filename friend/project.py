@@ -1,0 +1,125 @@
+"""Project-level commands: init (scaffold a new project)."""
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+TEMPLATES = Path(__file__).resolve().parent / "templates"
+DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_GENERATED = "app"
+
+# Languages friend can target out of the box. Adding one = a platform template + an entry here.
+LANGUAGES = {
+    "python": {"template": "python.md", "needs": ["python3"],
+               "toolchain": {"python": {"cmd": "python3"}}},
+    "typescript": {"template": "typescript.md", "needs": ["node", "npm"], "npm_tools": True,
+                   "toolchain": {"node": {"cmd": "node"},
+                                 "tsc": {"cmd": "tools/node_modules/.bin/tsc", "install": "cd tools && npm ci"}}},
+    "javascript": {"template": "javascript.md", "needs": ["node"],
+                   "toolchain": {"node": {"cmd": "node"}}},
+}
+
+FRIEND_TOML = """# friend configuration for {name}. Hand-edited; hashed into every run.
+# Targets are not listed here: the planner derives them from spec/platforms/ into plan.json.
+
+[project]
+name = "{name}"
+
+[layout]
+spec = "spec"
+generated = "{generated}"            # each target is generated into {generated}/<target>/
+tests = "tests/generated"
+plan = "plan.json"
+approvals = "approvals.json"
+holdout = []                       # hand-written suites never shown to agents
+
+[agent]
+command = "claude"
+model = "{model}"          # pinned; recorded in every manifest. Upgrade deliberately, then re-verify.
+max_budget_usd = 20.0              # per agent invocation
+step_timeout_s = 2400
+
+[workflow]
+max_repairs = 3
+max_test_rounds = 3
+max_disputes = 2
+max_untestable_ratio = 0.25
+audit_mutants = 4                  # mutation audit per target (0 disables)
+audit_min_kill_rate = 0.5
+
+{toolchain}
+# Hand-written components targets work with (e.g. a server) go here; tests start them with ctx.service(name):
+# [services.server]
+# launch = ["python3", "server/server.py", "--port", "0"]
+# ready = "LISTENING (\\\\d+)"
+# describe = "what it is and how tests use it"
+"""
+
+
+def ask(prompt: str, default: str = "") -> str:
+    if not sys.stdin.isatty():
+        return default
+    try:
+        ans = input(f"{prompt}{f' [{default}]' if default else ''}: ").strip()
+    except EOFError:
+        return default
+    return ans or default
+
+
+def detect() -> dict[str, bool]:
+    return {lang: all(shutil.which(n) for n in spec["needs"]) for lang, spec in LANGUAGES.items()}
+
+
+def init(root: Path, name: str | None, describe: str | None, langs: list[str], install: bool, force: bool) -> int:
+    if (root / "friend.toml").exists() and not force:
+        print(f"{root}/friend.toml already exists (use --force to overwrite the scaffold)", file=sys.stderr)
+        return 3
+    available = detect()
+    name = name or ask("Project name", root.name) or root.name
+    if describe is None:
+        describe = ask("What are you building? (one or two sentences, kept in spec/BRIEF.md)", "")
+    if not langs:
+        default = "python" if available["python"] else next((l for l, ok in available.items() if ok), "python")
+        langs = [l.strip() for l in ask(f"Target languages, comma-separated ({', '.join(LANGUAGES)})", default).split(",") if l.strip()]
+    bad = [l for l in langs if l not in LANGUAGES]
+    if bad or not langs:
+        print(f"unknown or no languages {bad or langs}; choose from {sorted(LANGUAGES)}", file=sys.stderr)
+        return 3
+    missing = [l for l in langs if not available[l]]
+    if missing:
+        print(f"warning: toolchain not found for {missing} (needs {[LANGUAGES[l]['needs'] for l in missing]}); "
+              "generation will refuse to start until it is installed", file=sys.stderr)
+
+    toolchain: dict[str, dict] = {}
+    for l in langs:
+        toolchain.update(LANGUAGES[l]["toolchain"])
+    tc = "\n".join(f'[toolchain.{n}]\ncmd = "{t["cmd"]}"' + (f'\ninstall = "{t["install"]}"' if t.get("install") else "") + "\n"
+                   for n, t in toolchain.items())
+    (root / "spec/core").mkdir(parents=True, exist_ok=True)
+    (root / "spec/platforms").mkdir(parents=True, exist_ok=True)
+    (root / "spec/extensions").mkdir(parents=True, exist_ok=True)
+    (root / "friend.toml").write_text(FRIEND_TOML.format(name=name, generated=DEFAULT_GENERATED, model=DEFAULT_MODEL, toolchain=tc))
+    (root / "spec/README.md").write_text((TEMPLATES / "spec_README.md").read_text())
+    (root / "spec/extensions/README.md").write_text((TEMPLATES / "extensions_README.md").read_text())
+    (root / "spec/BRIEF.md").write_text(f"# Brief: {name}\n\n{describe or '(describe the application here)'}\n")
+    for l in langs:
+        text = (TEMPLATES / "platforms" / LANGUAGES[l]["template"]).read_text().replace("{generated}", DEFAULT_GENERATED)
+        (root / "spec/platforms" / LANGUAGES[l]["template"]).write_text(text)
+    gi = root / ".gitignore"
+    lines = gi.read_text().splitlines() if gi.exists() else []
+    gi.write_text("\n".join(lines + [x for x in (".friend/", "__pycache__/", "tools/node_modules/") if x not in lines]) + "\n")
+    print(f"created friend.toml, spec/ ({', '.join(langs)}), .gitignore in {root}")
+    if any(LANGUAGES[l].get("npm_tools") for l in langs):
+        (root / "tools").mkdir(exist_ok=True)
+        shutil.copy(TEMPLATES / "tools_package.json", root / "tools/package.json")
+        if install and shutil.which("npm"):
+            print("installing the pinned TypeScript compiler into tools/ …")
+            r = subprocess.run(["npm", "install", "--no-audit", "--no-fund"], cwd=root / "tools", capture_output=True, text=True)
+            print("  ok" if r.returncode == 0 else f"  npm failed:\n{r.stderr[-800:]}")
+        else:
+            print("run `cd tools && npm install` to install the pinned TypeScript compiler")
+    print("\nnext:\n  write spec/core/ (the rule format is in spec/README.md)\n  friend spec approve\n  friend generate")
+    return 0
+
