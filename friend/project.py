@@ -244,6 +244,67 @@ def run_target(cfg, target: str, args: list[str]) -> int:
     os.execvp(argv[0], argv)
 
 
+def render_context(cfg, run=None) -> str:
+    """CONTEXT.md: where everything is and why, for people and for new agent sessions opening the project.
+    Written by friend from its own records after every run (deterministic; never by an agent)."""
+    import specflow
+    from config import load_plan
+    from speclib import all_spec_files, parse_rules
+    name = cfg.raw.get("project", {}).get("name") or cfg.root.name
+    brief = cfg.path(cfg.spec_dir) / "BRIEF.md"
+    idea = brief.read_text().split("\n", 2)[-1].strip().split("\n\n")[0][:600] if brief.exists() else ""
+    out = [f"# Context: {name}", "", "Written by friend after every run from its own records. Do not edit; it is replaced.", ""]
+    if idea:
+        out += ["## What this is", "", idea, ""]
+    rules = parse_rules(cfg.root, all_spec_files(cfg.root, cfg.spec_dir))
+    out += ["## Where things are", "", "| Path | What | Who writes it |", "|---|---|---|",
+            f"| `{cfg.spec_dir}/` | the specification: {len(rules)} rules; the source of truth | you (and friend's spec writer, with your approval) |",
+            f"| `{cfg.spec_dir}/DONE.md` | the sprint contract: what done means | you |",
+            f"| `{cfg['layout']['plan']}` | build targets | planner agent, approved by you |",
+            f"| `{cfg.tests_dir}/` | the test suite, written from the spec without seeing code | tester agent, approved by you |"]
+    plan = load_plan(cfg) or {"targets": {}}
+    for t_name, t in plan["targets"].items():
+        out.append(f"| `{t['dir']}/` | the `{t_name}` program (run: `friend run {t_name}`) | builder agent; never edit by hand |")
+    out += [f"| `{cfg['layout']['approvals']}` | what you approved, by content hash | friend |",
+            "| `.friend/` | run logs, proof of done, reports (not committed) | friend |", ""]
+    for t_name, t in plan["targets"].items():
+        try:
+            trace = json.loads((cfg.root / t["dir"] / "TRACE.json").read_text())["rules"]
+        except (OSError, ValueError, KeyError):
+            continue
+        files: dict[str, list[str]] = {}
+        for rule, fs in trace.items():
+            for f in fs if isinstance(fs, list) else []:
+                files.setdefault(f, []).append(rule)
+        out += [f"### `{t_name}`: which file implements which rules", ""]
+        out += [f"- `{t['dir']}/{f}`: {', '.join(sorted(rs, key=lambda r: (r.split('-')[0], int(r.split('-')[1]) if r.split('-')[-1].isdigit() else 0)))}"
+                for f, rs in sorted(files.items())] + [""]
+    qs = specflow.load_questions(cfg)
+    decided = [q for q in qs if q["status"] == "answered"]
+    assumed = [q for q in qs if q["status"] == "assumed"]
+    if decided or assumed:
+        out += ["## Decisions", ""] + [f"- **{q['answer']}** ({', '.join(q['rules']) or 'general'}): {q['question'][:200]}" for q in decided]
+        out += [f"- Assumed: {q['recommendation'][:200]} ({', '.join(q['rules']) or 'general'})" for q in assumed] + [""]
+    if run:
+        st = run.state
+        audit = st["tasks"].get("audit", {})
+        out += ["## Last build", "", f"- run `{st['run_id']}`: **{st['status']}**, spec `{st['spec_hash'][:12]}`, ${st['cost_usd']:.2f}"]
+        u = st.get("update")
+        if u:
+            what = "; ".join(f"{k} {', '.join(u[k])}" for k in ("changed", "added", "removed") if u[k]) or "no rule changed"
+            out.append(f"- edited the existing code for a spec change from `{u['base'][:12]}`: {what}")
+        if "kill_rate" in audit:
+            out.append(f"- mutation audit: tests caught {audit['kill_rate']:.0%} of deliberately broken copies")
+        survived = [f"{m['target']} {m['rule']}" for res in (audit.get("results") or {}).values() for m in res if m["outcome"] == "survived"]
+        if survived:
+            out.append(f"- weak spots (a broken copy passed every test): {', '.join(survived)}")
+        out.append("")
+    out += ["## How to change it", "", "- Change behaviour: `friend spec refine \"...\"` (or edit `spec/`), `friend approve spec`, then "
+            "`friend generate`. Existing tests and code are edited for the changed rules, not rebuilt.",
+            "- Check it: `friend verify` (writes `.friend/proof.md`).", ""]
+    return "\n".join(out)
+
+
 def render_report(cfg, run) -> str:
     """Markdown summary of a run, for humans (also written to .friend/report.md after every run)."""
     s = run.state

@@ -14,7 +14,7 @@ More:
   friend spec draft | refine "…" | check | contract | lint | approve
   friend questions · friend answer ID "decision" | --dismiss · friend answer all --recommended
   friend status · friend report · friend clean [--all] · friend approve spec|plan|tests · friend init
-  friend generate [--fresh] [--yes] [--budget USD] · friend verify [--no-holdout]
+  friend generate [--fresh] [--rebuild] [--yes] [--budget USD] · friend verify [--no-holdout]
 
 Global: --root DIR (default: nearest directory upwards with friend.toml), --json (machine output).
 Exit codes: 0 ok · 1 failed · 2 blocked on spec questions · 3 refused (config, preflight, approval, busy)
@@ -73,6 +73,13 @@ def human(ev: dict, verbose: bool) -> str | None:
             if ev.get("step") == "prepare":
                 return f"{p}  {ev['detail']}"
             return f"{p}  agent finished: {ev['subtype']}, {ev['turns']} turns, ${ev['cost_usd']}"
+        case "update.planned":
+            what = " · ".join(f"{len(ev[k])} {k} ({', '.join(ev[k][:6])}{' …' if len(ev[k]) > 6 else ''})"
+                              for k in ("changed", "added", "removed") if ev[k]) or "no rule changed"
+            return (f"== spec changed since the last build: {what}\n== editing the existing tests and code "
+                    f"({', '.join(ev['targets']) or 'no target can be kept'}); --rebuild starts from scratch")
+        case "update.none":
+            return None if ev["reason"] == "nothing built yet" else f"== full build: {ev['reason']}"
         case "step.skipped":
             return f"{p}skipped: {ev['reason']}"
         case "agent.tool":
@@ -198,7 +205,8 @@ def cmd_generate(args, cfg) -> int:
         auto = args.auto_approve or cfg["workflow"]["auto_approve"]
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.json
         try:
-            final = Controller(cfg, run, auto, reviewer=tty_reviewer if interactive else None, budget_usd=args.budget).execute()
+            final = Controller(cfg, run, auto, reviewer=tty_reviewer if interactive else None, budget_usd=args.budget,
+                               rebuild=args.rebuild).execute()
         except KeyboardInterrupt:
             run.state["status"] = "interrupted"
             run.save()
@@ -209,6 +217,7 @@ def cmd_generate(args, cfg) -> int:
             qs = [q for t in run.state["tasks"].values() for q in t.get("questions", [])]
             added = specflow.add_questions(cfg, qs, source=f"run {run.state['run_id']}")
             (mf_dir / "report.md").write_text(project.render_report(cfg, run))
+            (cfg.root / "CONTEXT.md").write_text(project.render_context(cfg, run))
         if not args.json:
             print(f"report: {mf_dir / 'report.md'}" + (f" · {len(added)} new spec questions: `friend questions`" if added else ""))
         return EXIT[final]
@@ -788,6 +797,7 @@ def main() -> int:
     g.add_argument("--fresh", action="store_true", help="start a new run (new sessions) instead of resuming")
     g.add_argument("--auto-approve", "--yes", "-y", action="store_true", help="approve generated plan/tests automatically (unattended runs)")
     g.add_argument("--budget", type=float, default=None, help="pause the run once total agent spend reaches this many USD")
+    g.add_argument("--rebuild", action="store_true", help="rebuild tests and code from scratch instead of editing them for a spec change")
     g.add_argument("-v", "--verbose", action="store_true")
     s = sub.add_parser("status")
     s.add_argument("--run")

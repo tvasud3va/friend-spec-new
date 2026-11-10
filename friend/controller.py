@@ -10,6 +10,9 @@
   interop interop-tagged tests over every mixed assignment of targets to roles
   audit   saboteur makes rule-violating mutants of each passing target; the suite must catch them
 
+After a spec change, existing tests and code are edited instead of rebuilt when that is safe (`plan_update`):
+the tester and each builder get the rule diff since the build, the full suite still judges the result.
+
 Every transition is persisted before the next action, so `generate` can resume after any crash.
 """
 from __future__ import annotations
@@ -81,15 +84,22 @@ class Controller:
     """reviewer(kind, summary, detail) -> ("approve" | "reject" | "quit", feedback): interactive approval, optional.
     budget_usd: total spend at which the run pauses (resumable), optional."""
 
-    def __init__(self, cfg: Config, run: Run, auto_approve: bool, reviewer=None, budget_usd: float | None = None) -> None:
+    def __init__(self, cfg: Config, run: Run, auto_approve: bool, reviewer=None, budget_usd: float | None = None,
+                 rebuild: bool = False) -> None:
         self.cfg, self.root, self.run, self.auto = cfg, cfg.root, run, auto_approve
-        self.reviewer, self.budget = reviewer, budget_usd
+        self.reviewer, self.budget, self.rebuild = reviewer, budget_usd, rebuild
 
     # ── top level ──
     def execute(self) -> str:
         r = self.run
         r.emit("run.resumed" if r.state["resumed"] else "run.started", spec_hash=r.state["spec_hash"][:12],
                versions=r.state["versions"], auto_approve=self.auto)
+        if "update" not in r.state or self.rebuild:
+            u, why = self.plan_update()
+            r.state["update"] = u
+            r.save()
+            r.emit("update.planned" if u else "update.none", **({k: u[k] for k in ("base", "added", "changed", "removed", "targets")}
+                                                                 if u else {"reason": why}))
         try:
             self.stage_plan()
             self.stage_tests()
@@ -186,18 +196,81 @@ class Controller:
         m = self.tests_manifest() or {}
         rep = m.get("report", {})
         unt = "\n".join(f"    {u['rule']}: {u['reason'][:160]}" for u in m.get("untestable", []))
-        summary = (f"── Tests ({self.cfg.tests_dir}/) ──\n  {rep.get('tests', '?')} tests · {len(rep.get('covered', []))}/{rep.get('must_rules', '?')} "
+        u = self.run.state.get("update")
+        upd = (f"\n  updated for the spec change: " + " · ".join(f"{k} {', '.join(u[k])}" for k in ("changed", "added", "removed") if u[k])
+               if u and any(u[k] for k in ("changed", "added", "removed")) else "")
+        summary = (f"── Tests ({self.cfg.tests_dir}/) ──{upd}\n  {rep.get('tests', '?')} tests · {len(rep.get('covered', []))}/{rep.get('must_rules', '?')} "
                    f"MUST/SHOULD rules covered · {len(m.get('untestable', []))} untestable · {len(rep.get('vacuous', []))} vacuous"
                    + (f"\n  untestable:\n{unt}" if unt else ""))
         tests, _ = checks.list_suite(self.cfg)
         detail = "\n".join(f"  {t['name']:45} {', '.join(t['rules'])}" + ("  [interop]" if t["interop"] else "") for t in tests or [])
         return summary, "rule coverage by test:\n" + detail
 
+    # ── editing instead of rebuilding ──
+    def plan_update(self) -> tuple[dict | None, str]:
+        """The rule diff since the existing tests and code were built, if they can be edited instead of rebuilt:
+        a passing suite, unchanged since its approval, built from a spec whose rules friend kept; the same
+        targets; and, per target, code from that spec with no hand edits. (None, why) means a full build."""
+        if self.rebuild:
+            return None, "--rebuild"
+        plan, manifest = load_plan(self.cfg), self.tests_manifest()
+        if not plan or not manifest or manifest.get("gates") != "passed":
+            return None, "nothing built yet"
+        if manifest.get("spec_hash") == self.run.state["spec_hash"]:
+            return None, "the tests already match this spec"
+        base = manifest["spec_hash"]
+        old, rec = approvals.rules_at(self.cfg, base), approvals.load(self.cfg).get("tests")
+        if old is None:
+            return None, f"the rules of spec {base[:12]}, which the code was built from, were not kept"
+        if not rec or rec["hash"] != approvals.tree_hash(self.root, self.cfg.tests_dir):
+            return None, "the test suite changed since it was approved"
+        platforms = set(platform_spec_files(self.root, self.cfg.spec_dir))
+        if platforms != {t["platform_spec"] for t in plan["targets"].values()}:
+            return None, "the set of target languages changed"
+        targets = []
+        for name, t in plan["targets"].items():
+            try:
+                m = json.loads((self.root / t["dir"] / checks.MANIFEST).read_text())
+            except (OSError, ValueError):
+                continue
+            if m.get("spec_hash") == base and not any(checks.diff(m.get("files", {}), checks.snapshot(self.root / t["dir"])).values()):
+                targets.append(name)
+        d = approvals.rule_diff(old, approvals.spec_rules(self.cfg))
+        return {"base": base, **d, "targets": targets, "old": {i: old[i] for i in d["changed"] + d["removed"]}}, ""
+
+    def changes_for(self, files: list[Path]) -> dict[str, list[str]]:
+        """The update's rule diff restricted to rules defined in `files` (now, or before for removed rules)."""
+        u, names = self.run.state["update"], {str(p.relative_to(self.root)) for p in files}
+        now = approvals.spec_rules(self.cfg)
+        where = lambda i: (now.get(i) or u["old"].get(i) or {}).get("file")  # noqa: E731
+        return {k: [i for i in u[k] if where(i) in names] for k in ("added", "changed", "removed")}
+
+    def describe_changes(self, d: dict[str, list[str]], trace: dict | None = None) -> str:
+        now, old = approvals.spec_rules(self.cfg), self.run.state["update"]["old"]
+        where = lambda i: f"  \n  implemented in: {', '.join(trace[i])}" if trace and isinstance(trace.get(i), list) and trace[i] else ""  # noqa: E731
+        out = []
+        if d["changed"]:
+            out += ["### Changed rules", ""] + [f"- **{i}** ({now[i]['level']}) now: {now[i]['text']}  \n  was: ({old[i]['level']}) "
+                                                f"{old[i]['text']}{where(i)}" for i in d["changed"]] + [""]
+        if d["added"]:
+            out += ["### New rules", ""] + [f"- **{i}** ({now[i]['level']}) {now[i]['text']}" for i in d["added"]] + [""]
+        if d["removed"]:
+            out += ["### Removed rules", ""] + [f"- **{i}** was: {old[i]['text']}{where(i)}" for i in d["removed"]] + [""]
+        return "\n".join(out) or "No rule changed; only explanatory text did."
+
     # ── stage: plan ──
     def stage_plan(self) -> None:
         r, ts = self.run, self.run.t("plan")
         if ts["status"] == "done" and approvals.status(self.cfg, "plan")[0] == "approved":
             return
+        rec = approvals.load(self.cfg).get("plan")
+        if r.state.get("update") and rec and rec["hash"] == approvals.tree_hash(self.root, self.cfg["layout"]["plan"]):
+            plan = load_plan(self.cfg)                # same targets, plan untouched since approval: carry it forward
+            plan.update(spec_hash=r.state["spec_hash"], run_id=r.state["run_id"])
+            write_atomic(self.cfg.path(self.cfg["layout"]["plan"]), json.dumps(plan, indent=2) + "\n")
+            approvals.approve(self.cfg, "plan", by="carried", note=f"unchanged targets, carried from spec {r.state['update']['base'][:12]}")
+            r.emit("step.skipped", task="plan", reason="same targets as the last build: plan carried forward")
+            return r.set("plan", status="done")
         st, _ = approvals.status(self.cfg, "plan")
         existing = load_plan(self.cfg)
         feedback = ""
@@ -266,15 +339,27 @@ class Controller:
             r.emit("step.skipped", task="tests", reason="approved/validated suite for this spec already exists")
             return self.review_tests()
         d = self.cfg.path(self.cfg.tests_dir)
-        if d.exists():
-            shutil.rmtree(d)
-        d.mkdir(parents=True)
         r.set("tests", status="working", session_id=str(uuid.uuid4()), session_started=False, attempts=0, rounds=0)
-        text, resume = prompt("tester", **self.tests_vars()), False
+        if r.state.get("update"):                     # edit the existing suite for the rules that changed
+            changes = self.changes_for(behaviour_spec_files(self.root, self.cfg.spec_dir))
+            untestable = (manifest or {}).get("untestable") or []
+            if not any(changes.values()) and not self.check_tests(untestable):
+                approvals.approve(self.cfg, "tests", by="carried", note="no behaviour rule changed; suite re-gated unchanged")
+                r.emit("step.skipped", task="tests", reason="no behaviour rule changed: suite kept as is")
+                return r.set("tests", status="done")
+            first = lambda: prompt("tester_update", **self.tests_vars(), base12=r.state["update"]["base"][:12],  # noqa: E731
+                                   changes=self.describe_changes(changes),
+                                   untestable="\n".join(f"- {u['rule']}: {u['reason']}" for u in untestable) or "- (none)")
+        else:
+            if d.exists():
+                shutil.rmtree(d)
+            d.mkdir(parents=True)
+            first = lambda: prompt("tester", **self.tests_vars())  # noqa: E731
+        text, resume = first(), False
         while True:
             res = self.agent_step("tests", roles.tester(self.cfg), text, resume, f"tests-{ts['rounds']}-{ts['attempts']}")
             if self.crashed("tests", res):
-                text, resume = prompt("tester", **self.tests_vars()), False
+                text, resume = first(), False
                 r.set("tests", session_id=str(uuid.uuid4()))
                 continue
             out = res.output or {}
@@ -366,17 +451,34 @@ class Controller:
         role = roles.builder(self.cfg, name, t)
         while (st := ts["status"]) not in TERMINAL:
             if st == "pending":
+                u = r.state.get("update")
+                if u and name in u["targets"]:        # edit the existing code: only the rules that changed
+                    self.restamp(t, u["base"])
+                    changes = self.changes_for(target_spec_files(self.root, self.cfg.spec_dir, t["platform_spec"]))
+                    ts["changes"] = changes
+                    r.emit("step.finished", task=task, step="prepare", detail=f"kept {t['dir']}/ to edit: "
+                           + (" · ".join(f"{k} {', '.join(v)}" for k, v in changes.items() if v) or "no rule of this target changed"))
+                    r.set(task, status="updating" if any(changes.values()) else "checking",
+                          session_id=str(uuid.uuid4()), session_started=False, attempts=0)
+                    continue
                 d = self.root / t["dir"]
                 if d.exists():
                     shutil.rmtree(d)  # regeneration boundary: the whole target directory
                 d.mkdir(parents=True)
                 r.emit("step.finished", task=task, step="prepare", detail=f"cleaned {t['dir']}/")
                 r.set(task, status="implementing", session_id=str(uuid.uuid4()), session_started=False, attempts=0)
-            elif st in ("implementing", "repairing"):
-                if ts["attempts"] > 0 or (st == "implementing" and ts["session_started"]):
+            elif st in ("implementing", "updating", "repairing"):
+                if ts["attempts"] > 0 or (st in ("implementing", "updating") and ts["session_started"]):
                     text = self.continue_prompt(name, t)
                 elif st == "implementing":
                     text = prompt("implement", **self.build_vars(name, t))
+                elif st == "updating":
+                    try:
+                        trace = json.loads((self.root / t["dir"] / "TRACE.json").read_text())["rules"]
+                    except (OSError, ValueError, KeyError):
+                        trace = {}
+                    text = prompt("update", **self.build_vars(name, t), base12=r.state["update"]["base"][:12],
+                                  changes=self.describe_changes(ts["changes"], trace))
                 else:
                     text = prompt("repair", **self.build_vars(name, t), round=ts["repairs"],
                                   failures=format_failures(ts["last_checks"]["failures"]))
@@ -402,6 +504,16 @@ class Controller:
                     r.set(task, status="repairing", repairs=ts["repairs"] + 1, attempts=0)
                 else:
                     r.set(task, status="failed", error=f"checks still failing after {w['max_repairs']} repairs")
+
+    def restamp(self, t: dict, base: str) -> None:
+        """Point the generated-file headers of kept code at the new spec (a mechanical edit, not the builder's job)."""
+        old, new = base[:12], self.run.state["spec_hash"][:12]
+        d = self.root / t["dir"]
+        for p in sorted({p for g in t["sources"] for p in d.glob(g) if p.is_file()}):
+            lines = p.read_text().split("\n")
+            head = [l.replace(f"from spec {old}", f"from spec {new}") for l in lines[:3]]
+            if head != lines[:3]:
+                p.write_text("\n".join(head + lines[3:]))
 
     def check_target(self, name: str, t: dict) -> list[dict]:
         r, task = self.run, f"build:{name}"
@@ -553,7 +665,10 @@ class Controller:
             trace = {}
         rules_all = [x.id for x in parse_rules(self.root, behaviour_spec_files(self.root, self.cfg.spec_dir))
                      if x.level == "MUST" and x.id in covered and isinstance(trace.get(x.id), list) and trace[x.id]]
-        chosen = rng.sample(rules_all, min(n, len(rules_all)))
+        u = r.state.get("update") or {}
+        fresh = [x for x in rules_all if x in u.get("changed", []) + u.get("added", [])]   # edited code is audited first
+        rest = [x for x in rules_all if x not in fresh]
+        chosen = (rng.sample(fresh, min(n, len(fresh))) + rng.sample(rest, min(n, len(rest))))[:n]
         dirs = [f"{self.cfg.generated_root}/.mut-{name}-{k}" for k in range(len(chosen))]
         for d in dirs:
             p = self.root / d

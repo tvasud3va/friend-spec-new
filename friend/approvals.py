@@ -15,6 +15,7 @@ from config import Config
 from runstate import write_atomic
 
 KINDS = ("spec", "plan", "tests")
+SPEC_HISTORY = 4   # rule snapshots of recently approved specs, the baselines for updating existing code
 
 
 class ApprovalError(Exception):
@@ -82,8 +83,35 @@ def approve(cfg: Config, kind: str, by: str, note: str = "") -> dict:
         if kind == "tests" and by == "arbitration" and data.get("tests"):
             rec["amendments"] = data["tests"].get("amendments", []) + [{"at": rec["approved_at"], "note": note}]
     data[kind] = rec
+    if kind == "spec":
+        remember(data, current, spec_rules(cfg))
     save(cfg, data)
     return rec
+
+
+def spec_rules(cfg: Config) -> dict[str, dict]:
+    """Every rule in the spec as it is now: {id: {level, text, file}}."""
+    from speclib import all_spec_files, parse_rules
+    return {r.id: {"level": r.level, "text": r.text, "file": r.file} for r in parse_rules(cfg.root, all_spec_files(cfg.root, cfg.spec_dir))}
+
+
+def remember(data: dict, spec_hash: str, rules: dict) -> None:
+    hist = [h for h in data.get("spec_history", []) if h["hash"] != spec_hash]
+    data["spec_history"] = (hist + [{"hash": spec_hash, "rules": rules}])[-SPEC_HISTORY:]
+
+
+def rules_at(cfg: Config, spec_hash: str) -> dict[str, dict] | None:
+    """The rules of an earlier approved spec, or None if friend did not keep them."""
+    return next((h["rules"] for h in load(cfg).get("spec_history", []) if h["hash"] == spec_hash), None)
+
+
+def rule_diff(old: dict[str, dict], new: dict[str, dict]) -> dict[str, list[str]]:
+    gone = lambda rules, i: i not in rules or rules[i]["level"] == "REMOVED"  # noqa: E731
+    order = lambda i: (i.rsplit("-", 1)[0], int(i.rsplit("-", 1)[1]) if i.rsplit("-", 1)[-1].isdigit() else 0)  # noqa: E731
+    return {"added": sorted((i for i in new if gone(old, i) and not gone(new, i)), key=order),
+            "changed": sorted((i for i in new if not gone(old, i) and not gone(new, i)
+                               and (old[i]["text"], old[i]["level"]) != (new[i]["text"], new[i]["level"])), key=order),
+            "removed": sorted((i for i in old if not gone(old, i) and gone(new, i)), key=order)}
 
 
 def revoke(cfg: Config, kind: str) -> None:
@@ -96,4 +124,8 @@ def spec_hash(cfg: Config) -> str:
     st, why = status(cfg, "spec")
     if st != "approved":
         raise ApprovalError(f"spec is not approved: {why}. Review it, then run `friend approve spec`")
-    return load(cfg)["spec"]["hash"]
+    data = load(cfg)
+    if rules_at(cfg, data["spec"]["hash"]) is None:   # approved before friend kept rule snapshots: the files still match
+        remember(data, data["spec"]["hash"], spec_rules(cfg))
+        save(cfg, data)
+    return data["spec"]["hash"]

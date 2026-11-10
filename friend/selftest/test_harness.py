@@ -302,6 +302,69 @@ class Safety(unittest.TestCase):
         self.assertEqual((st["plan"]["status"], st["tests"]["status"]), ("stale", "stale"))
 
 
+LOWER_TEST = '''
+
+@test("E-4")
+def lower(ctx):
+    p = ctx.spawn()
+    p.send("lower ABC")
+    p.expect(echo="abc")
+'''
+LOWER_IMPL = GOOD_IMPL.replace(
+    'out = line[6:].upper() if line.startswith("upper ") else line   # E-1, E-2',
+    'out = line[6:].upper() if line.startswith("upper ") else line[6:].lower() if line.startswith("lower ") else line   # E-1, E-2, E-4')
+TRACE_V2 = json.dumps({"rules": {**json.loads(TRACE)["rules"], "E-4": ["main.py"]}})
+
+
+class Updating(unittest.TestCase):
+    """A spec change edits the existing tests and code instead of rebuilding them."""
+
+    def project(self, **extra) -> Project:
+        tests_v2 = {"write": {"tests/generated/test_echo.py": TESTS_GOOD["write"]["tests/generated/test_echo.py"] + LOWER_TEST}}
+        build_v2 = {"write": {"clients/py/main.py": LOWER_IMPL, "clients/py/TRACE.json": TRACE_V2}}
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD, tests_v2],
+                     "builder": [{"write": {**BUILD_GOOD["write"], "clients/py/NOTES.txt": "kept"}}, build_v2], **extra})
+        p.generate("--auto-approve")
+        (p.dir / "spec/core/echo.md").write_text(SPEC_CORE.replace("upper-cased.", "upper-cased (ASCII letters).")
+                                                 + "- **E-4** (MUST) A line `lower <text>` prints `{\"echo\": <text>}` lower-cased.\n")
+        p.friend("approve", "spec", check_code=0)
+        return p
+
+    def test_spec_change_edits_tests_and_code(self):
+        p = self.project()
+        ev = p.generate("--auto-approve")
+        self.assertEqual(ev[-1]["status"], "passed")
+        plan = next(e for e in ev if e["type"] == "update.planned")
+        self.assertEqual((plan["changed"], plan["added"], plan["removed"], plan["targets"]), (["E-2"], ["E-4"], [], ["py"]))
+        calls = p.calls()[3:]
+        self.assertEqual([c["role"] for c in calls], ["tester", "builder"])            # plan carried, no planner call
+        self.assertIn("update the conformance test suite", calls[0]["prompt"])
+        self.assertIn("was: (MUST) A line `upper <text>`", calls[0]["prompt"])
+        self.assertIn("update the `py` target", calls[1]["prompt"])
+        self.assertIn("implemented in: main.py", calls[1]["prompt"])
+        self.assertTrue((p.dir / "clients/py/NOTES.txt").exists(), "kept code must not be wiped")
+        spec12 = json.loads((p.dir / "approvals.json").read_text())["spec"]["hash"][:12]
+        self.assertIn(f"from spec {spec12}", (p.dir / "clients/py/main.py").read_text())   # header restamped
+        p.friend("verify", check_code=0)
+
+    def test_hand_edited_code_is_rebuilt_and_rebuild_flag_forces_it(self):
+        p = self.project()
+        main = p.dir / "clients/py/main.py"
+        main.write_text(main.read_text() + "# hand edit\n")
+        ev = p.generate("--auto-approve")
+        self.assertEqual(next(e for e in ev if e["type"] == "update.planned")["targets"], [])
+        self.assertIn("generate the `py` target", p.calls()[-1]["prompt"])           # full build, folder cleaned
+        self.assertFalse((p.dir / "clients/py/NOTES.txt").exists())
+
+    def test_rebuild_flag_starts_from_scratch(self):
+        p = self.project()
+        ev = p.generate("--auto-approve", "--rebuild")
+        self.assertIn("update.none", types(ev))
+        later = p.calls()[3:]
+        self.assertEqual([c["role"] for c in later], ["planner", "tester", "builder"])   # everything from scratch
+        self.assertIn("write the conformance test suite", later[1]["prompt"])
+
+
 INTERFACE = """# Core: interface
 Rule prefix I.
 - **I-1** (MUST) The program reads lines from stdin and writes JSON lines to stdout.
