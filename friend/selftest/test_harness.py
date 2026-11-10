@@ -384,6 +384,28 @@ class NewUserFlow(unittest.TestCase):
         calls = [json.loads(l) for l in self.scenario.with_suffix(".calls").read_text().splitlines()]
         self.assertIn("full Unicode", calls[-1]["prompt"])
 
+
+    def test_new_interviews_then_drafts_spec_and_contract(self):
+        self.init()
+        q = {"question": "Should upper-casing apply to every line?", "why": "changes output",
+             "options": ["only `upper ` lines", "every line"], "recommendation": "only `upper ` lines"}
+        self.scenario_is({"interviewer": [{"output": {"ready": False, "understanding": "- echoes lines", "questions": [q]}},
+                                          {"output": {"ready": True, "understanding": "- echoes lines\n- `upper` only", "questions": []}}],
+                          "author": [{"write": {"spec/core/interface.md": INTERFACE, "spec/core/echo.md": SPEC_CORE,
+                                                "spec/DONE.md": DONE}}]})
+        r = run_mf(self.dir, "new", "--idea", "an echo tool", env=self.env)       # not a TTY: prints questions, exit 4
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+        self.assertIn("I1. Should upper-casing", r.stdout)
+        r = run_mf(self.dir, "new", "--answer", "I1=1", env=self.env)
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)                    # spec drafted, awaiting approval
+        brief = (self.dir / "spec/BRIEF.md").read_text()
+        self.assertIn("only `upper ` lines", brief)
+        self.assertIn("`upper` only", brief)
+        self.assertIn("D-1 Typed lines come back", r.stdout)
+        calls = [json.loads(l) for l in self.scenario.with_suffix(".calls").read_text().splitlines()]
+        self.assertIn("only `upper ` lines", [c for c in calls if c["role"] == "interviewer"][-1]["prompt"])
+        self.assertEqual(run_mf(self.dir, "spec", "approve", env=self.env).returncode, 0)
+
     def test_contract_must_cite_existing_rules(self):
         self.init()
         (self.dir / "spec/core/interface.md").write_text(INTERFACE)

@@ -158,5 +158,101 @@ def interactive_answers(qs: list[dict], read: Callable[[str], str]) -> dict[str,
     return decided
 
 
+# ── interview (friend new) ────────────────────────────────────────────────────
+
+INTERVIEW_MAX_QUESTIONS = 4
+
+
+def _ipath(cfg: Config) -> Path:
+    return cfg.root / ".friend" / "interview.json"
+
+
+def load_interview(cfg: Config) -> dict | None:
+    p = _ipath(cfg)
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def save_interview(cfg: Config, state: dict) -> None:
+    _ipath(cfg).parent.mkdir(exist_ok=True)
+    write_atomic(_ipath(cfg), json.dumps(state, indent=2) + "\n")
+
+
+def new_interview(idea: str) -> dict:
+    return {"idea": idea, "rounds": [], "understanding": "", "ready": False, "status": "interviewing",
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
+
+
+def transcript(state: dict) -> list[tuple[str, str]]:
+    return [(q["question"], q["answer"]) for r in state["rounds"] for q in r["questions"] if q.get("answer")]
+
+
+def interview_round(cfg: Config, state: dict, languages: list[str], sink) -> bool:
+    """Ask the interviewer for its understanding and the next questions. Each round is a fresh session with the
+    full transcript, so an interview survives crashes and can continue on another day. Returns False on failure."""
+    run, ctl = _session(cfg, sink)
+    n = len(state["rounds"]) + 1
+    run.set("interview", status="working", session_id=str(uuid.uuid4()), session_started=False, attempts=0)
+    qa = "\n".join(f"- {q} → {a}" for q, a in transcript(state)) or "(none yet: this is the first round)"
+    text = prompt("interview", round=n, idea=state["idea"], languages=", ".join(languages) or "(not chosen)",
+                  transcript=qa, max=INTERVIEW_MAX_QUESTIONS)
+    try:
+        res = ctl.agent_step("interview", roles.interviewer(cfg), text, False, f"interview-{n}")
+    except Stop:
+        return False
+    out = res.output or {}
+    if not res.ok or "understanding" not in out:
+        return False
+    run.set("interview", status="done")
+    qs = [] if out.get("ready") else (out.get("questions") or [])[:INTERVIEW_MAX_QUESTIONS]
+    base = sum(len(r["questions"]) for r in state["rounds"])
+    state["rounds"].append({"questions": [{"id": f"I{base + i}", "question": q["question"], "why": q.get("why", ""),
+                                           "options": q.get("options", []), "recommendation": q.get("recommendation", ""),
+                                           "answer": None} for i, q in enumerate(qs, 1)]})
+    state["understanding"] = out["understanding"]
+    state["ready"] = bool(out.get("ready")) or not qs
+    save_interview(cfg, state)
+    return True
+
+
+def open_interview_questions(state: dict) -> list[dict]:
+    return [q for q in (state["rounds"][-1]["questions"] if state["rounds"] else []) if q.get("answer") is None]
+
+
+def answer_interview(state: dict, answers: dict[str, str]) -> None:
+    for q in open_interview_questions(state):
+        if q["id"] in answers:
+            a = answers[q["id"]].strip()
+            opts = q.get("options") or []
+            if a.isdigit() and 1 <= int(a) <= len(opts):
+                a = opts[int(a) - 1]
+            q["answer"] = a or q.get("recommendation") or "(no preference)"
+
+
+def ask_interview(qs: list[dict], read: Callable[[str], str]) -> tuple[dict[str, str], bool]:
+    """Ask in the terminal. Returns (answers, stop) where stop means 'enough questions, write the spec'."""
+    answers: dict[str, str] = {}
+    for q in qs:
+        print(f"\n{q['id']}. {q['question']}")
+        if q.get("why"):
+            print(f"    why it matters: {q['why']}")
+        for i, opt in enumerate(q["options"], 1):
+            print(f"    {i}) {opt}")
+        if q.get("recommendation"):
+            print(f"    recommended: {q['recommendation']}")
+        a = read("    > number or your own words (Enter = recommended, d = done asking): ").strip()
+        if a.lower() in ("d", "done"):
+            return answers, True
+        answers[q["id"]] = a
+    return answers, False
+
+
+def write_brief(cfg: Config, name: str, state: dict) -> Path:
+    p = cfg.path(cfg.spec_dir) / "BRIEF.md"
+    qa = "\n".join(f"- **{q}**  \n  {a}" for q, a in transcript(state))
+    p.write_text(f"# Brief: {name}\n\n{state['idea'].strip()}\n\n## What we agreed\n\n{state['understanding'].strip()}\n"
+                 + (f"\n## Interview\n\n{qa}\n" if qa else ""))
+    return p
+
+
 def contract(cfg: Config, sink) -> tuple[bool, dict, list[str]]:
     return _author(cfg, prompt("spec_contract"), sink, "contract")

@@ -7,7 +7,7 @@ code is wrong. Behaviour questions are answered here, never by reading generated
 
 | Path | Content | Applies to |
 |---|---|---|
-| `BRIEF.md` | the idea, in your words (context, not requirements) | n/a |
+| `BRIEF.md` | the idea and the interview that refined it (context, not requirements) | n/a |
 | `DONE.md` | **the sprint contract**: what done means, in plain language, each item tied to rules | proof (`friend verify`) |
 | `core/*.md` | behaviour every implementation shares | all targets |
 | `core/interface.md` | **the control interface**: how a program is launched, driven and observed. Required: it is what makes the spec testable | all targets |

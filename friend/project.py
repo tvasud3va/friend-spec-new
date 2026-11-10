@@ -74,7 +74,8 @@ def detect() -> dict[str, bool]:
     return {lang: all(shutil.which(n) for n in spec["needs"]) for lang, spec in LANGUAGES.items()}
 
 
-def init(root: Path, name: str | None, describe: str | None, langs: list[str], install: bool, force: bool) -> int:
+def init(root: Path, name: str | None, describe: str | None, langs: list[str], install: bool, force: bool,
+         show_next: bool = True) -> int:
     if (root / "friend.toml").exists() and not force:
         print(f"{root}/friend.toml already exists (use --force to overwrite the scaffold)", file=sys.stderr)
         return 3
@@ -122,8 +123,9 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
             print("  ok" if r.returncode == 0 else f"  npm failed:\n{r.stderr[-800:]}")
         else:
             print("run `cd tools && npm install` to install the pinned TypeScript compiler")
-    print("\nnext:\n  friend spec draft      # an agent drafts spec/core/ from spec/BRIEF.md (or write it yourself)\n"
-          "  friend spec check      # find ambiguities and answer them\n  friend spec approve\n  friend generate")
+    if show_next:
+        print("\nnext:\n  friend spec draft      # an agent drafts spec/core/ from spec/BRIEF.md (or write it yourself)\n"
+              "  friend spec check      # find ambiguities and answer them\n  friend spec approve\n  friend generate")
     return 0
 
 

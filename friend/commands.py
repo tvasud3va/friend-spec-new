@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""friend: describe an app, approve a spec, get independently tested implementations.
+"""friend: describe an app, get interviewed, approve a spec, get independently tested implementations.
 
 Start here:
-  friend init                    scaffold a project; describe your idea in spec/BRIEF.md
-  friend spec draft              an agent drafts the spec and sprint contract from the brief (then check, approve)
+  friend new                     describe your idea, answer questions → approved spec + sprint contract
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
   friend verify                  prove the sprint contract: every check re-run, no agent → .friend/proof.md
   friend run TARGET [args…]      run what was built
@@ -12,7 +11,7 @@ More:
   friend doctor                  check Claude Code login, toolchains, spec and approvals
   friend spec draft | refine "…" | check | contract | lint | approve
   friend questions · friend answer ID "decision" | --dismiss · friend answer all --recommended
-  friend status · friend report · friend clean [--all] · friend approve spec|plan|tests
+  friend status · friend report · friend clean [--all] · friend approve spec|plan|tests · friend init
   friend generate [--fresh] [--yes] [--budget USD] · friend verify [--no-holdout]
 
 Global: --root DIR (default: nearest directory upwards with friend.toml), --json (machine output).
@@ -398,6 +397,129 @@ def cmd_init(args, root: Path) -> int:
     return project.init(root, args.name, args.describe, args.lang or [], install=not args.no_install, force=args.force)
 
 
+def cmd_new(args) -> int:
+    """Idea → interview → brief → spec + sprint contract → review questions → approval. Resumable at every step."""
+    root = Path(args.root).resolve() if args.root else find_root(Path.cwd())
+    interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.json
+    sink = make_quiet_sink(steps=False)
+    if not (root / "friend.toml").exists():
+        idea = args.idea or (project.ask("What do you want to build? (one or two sentences)") if interactive else "")
+        if not idea:
+            print("describe your idea: friend new --idea \"...\" --lang python", file=sys.stderr)
+            return 3
+        args.idea = idea
+        code = project.init(root, args.name, idea, args.lang or [], install=not args.no_install, force=False, show_next=False)
+        if code:
+            return code
+    try:
+        cfg = load(root)
+    except ConfigError as e:
+        print(f"config error: {e}", file=sys.stderr)
+        return 3
+    from speclib import all_spec_files, parse_rules, platform_spec_files
+    state = specflow.load_interview(cfg)
+    if state is None:
+        brief = cfg.path(cfg.spec_dir) / "BRIEF.md"
+        idea = args.idea or (brief.read_text().split("\n", 2)[-1].strip() if brief.exists() else "")
+        if not idea or "(describe the application here" in idea:
+            idea = project.ask("What do you want to build? Describe it in your own words") if interactive else ""
+        if not idea:
+            print("describe your idea: friend new --idea \"...\"", file=sys.stderr)
+            return 3
+        state = specflow.new_interview(idea)
+        specflow.save_interview(cfg, state)
+    langs = [Path(p).stem for p in platform_spec_files(cfg.root, cfg.spec_dir)]
+
+    if state["status"] == "interviewing":
+        if args.answer:
+            specflow.answer_interview(state, dict(a.split("=", 1) for a in args.answer if "=" in a))
+        if args.done:
+            state["ready"] = True
+        specflow.save_interview(cfg, state)
+        while not state["ready"]:
+            qs = specflow.open_interview_questions(state)
+            if not qs:
+                if len(state["rounds"]) >= args.max_rounds:
+                    state["ready"] = True
+                    break
+                print("thinking about your idea …" if not state["rounds"] else "thinking about your answers …", flush=True)
+                if not specflow.interview_round(cfg, state, langs, sink):
+                    print("the interviewer failed (see .friend/spec/runs); run `friend new` again to retry", file=sys.stderr)
+                    return 1
+                continue
+            if not interactive:
+                if args.json:
+                    print(json.dumps({"status": "questions", "understanding": state["understanding"], "questions": qs}, indent=2))
+                else:
+                    print(state["understanding"] + "\n")
+                    for q in qs:
+                        print(f"{q['id']}. {q['question']}\n    " + "\n    ".join(f"{i}) {o}" for i, o in enumerate(q["options"], 1))
+                              + (f"\n    recommended: {q['recommendation']}" if q.get("recommendation") else ""))
+                    print('\nanswer with: friend new --answer I1=2 --answer I2="your words"   (or --done to stop asking)')
+                return 4
+            answers, stop = specflow.ask_interview(qs, input)
+            specflow.answer_interview(state, answers)
+            state["ready"] = stop
+            specflow.save_interview(cfg, state)
+        name = cfg.raw.get("project", {}).get("name") or cfg.root.name
+        specflow.write_brief(cfg, name, state)
+        state["status"] = "briefed"
+        specflow.save_interview(cfg, state)
+        print(f"\nhere is what I understood (saved to {cfg.spec_dir}/BRIEF.md):\n\n{state['understanding']}\n")
+
+    if state["status"] == "briefed":
+        print("writing the spec and the sprint contract …", flush=True)
+        ok, out, problems = specflow.draft(cfg, sink)
+        if show_spec_result(ok, out, problems, cfg, hint=False, brief=True):
+            return 1
+        state["status"] = "drafted"
+        specflow.save_interview(cfg, state)
+
+    while state["status"] in ("drafted", "reviewed"):
+        if state["status"] == "drafted":
+            print("checking the spec for gaps two builders could read differently …", flush=True)
+            ok, found = specflow.review(cfg, sink, 6)
+            added = specflow.add_questions(cfg, found, source="spec review") if ok else []
+            if added and interactive:
+                print(f"{len(added)} more question(s) to make the spec precise:")
+                apply_decisions(cfg, specflow.interactive_answers(added, input), sink, hint=False)
+            elif added:
+                print(f"{len(added)} open spec question(s): `friend questions`, then `friend answer ID \"decision\"`")
+            state["status"] = "reviewed"
+            specflow.save_interview(cfg, state)
+        rules = parse_rules(cfg.root, all_spec_files(cfg.root, cfg.spec_dir))
+        import contract
+        items, _ = contract.parse(cfg.root, cfg.spec_dir)
+        levels = {lv: sum(r.level == lv for r in rules) for lv in ("MUST", "SHOULD", "MAY")}
+        print(f"\nspec: {len(rules)} rules ({levels['MUST']} MUST, {levels['SHOULD']} SHOULD, {levels['MAY']} MAY) in {cfg.spec_dir}/")
+        if items:
+            print(f"sprint contract ({cfg.spec_dir}/DONE.md), done means:")
+            for it in items:
+                print(f"  [ ] {it.id} {it.text}")
+        problems = lint(cfg.root, cfg.spec_dir)
+        if problems:
+            print("spec lint failed:\n  " + "\n  ".join(problems), file=sys.stderr)
+            return 1
+        if not interactive:
+            print("\nreview spec/ and spec/DONE.md, then: friend spec approve && friend generate")
+            return 4
+        a = input("\napprove the spec and contract? [y]es · [a]sk me more · [e]dit it myself > ").strip().lower()
+        if a.startswith("a"):
+            state["status"] = "drafted"
+            continue
+        if not a.startswith("y"):
+            print(f"edit {cfg.spec_dir}/ (or `friend spec refine \"...\"`), then `friend spec approve` and `friend generate`")
+            return 0
+        rec = approvals.approve(cfg, "spec", by="human")
+        state["status"] = "approved"
+        specflow.save_interview(cfg, state)
+        print(f"approved spec {rec['hash'][:12]}")
+    if state["status"] != "approved":
+        return 0
+    print("\nnext: friend generate   (builds tests and code; then `friend verify` proves the contract)")
+    return 0
+
+
 def cmd_doctor(args, cfg) -> int:
     rows = project.doctor(cfg)
     if args.json:
@@ -424,7 +546,17 @@ def cmd_report(args, cfg) -> int:
     return 0
 
 
-def show_spec_result(ok: bool, out: dict, problems: list[str], cfg, hint: bool = True) -> int:
+def show_spec_result(ok: bool, out: dict, problems: list[str], cfg, hint: bool = True, brief: bool = False) -> int:
+    if brief:  # friend new: the author's assumptions are recorded, not asked; the reviewer's questions are the quiz
+        added = specflow.add_questions(cfg, out.get("spec_questions") or [], source="spec author", status="assumed")
+        if out.get("files_written"):
+            print("wrote " + ", ".join(out["files_written"]))
+        if added:
+            print(f"{len(added)} assumption(s) made where you hadn't decided (see `friend questions --all`)")
+        if not ok:
+            print("spec still has problems:\n  " + "\n  ".join(problems), file=sys.stderr)
+            return 1
+        return 0
     if out.get("summary"):
         print(out["summary"])
     if out.get("files_written"):
@@ -545,8 +677,8 @@ def cmd_answer(args, cfg) -> int:
     return apply_decisions(cfg, {args.id: ("answered", text)}, make_quiet_sink())
 
 
-def make_quiet_sink():
-    shown = {"gate.failed", "policy.denied", "agent.retry", "step.started", "step.finished"}
+def make_quiet_sink(steps: bool = True):
+    shown = {"gate.failed", "policy.denied", "agent.retry"} | ({"step.started", "step.finished"} if steps else set())
 
     def sink(ev: dict) -> None:
         if ev["type"] in shown:
@@ -567,6 +699,14 @@ def main() -> int:
     i.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
     i.add_argument("--no-install", action="store_true", help="don't run npm for the TypeScript compiler")
     i.add_argument("--force", action="store_true")
+    nw = sub.add_parser("new", help="start here: describe your idea, answer questions, get an approved spec + contract")
+    nw.add_argument("--idea", help="what you want to build (asked interactively if omitted)")
+    nw.add_argument("--name")
+    nw.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
+    nw.add_argument("--answer", action="append", default=[], help="non-interactive: ID=answer (option number or text)")
+    nw.add_argument("--done", action="store_true", help="stop the interview and write the spec now")
+    nw.add_argument("--max-rounds", type=int, default=6)
+    nw.add_argument("--no-install", action="store_true")
     d = sub.add_parser("doctor")
     sp = sub.add_parser("spec")
     ssub = sp.add_subparsers(dest="spec_cmd", required=True)
@@ -604,11 +744,13 @@ def main() -> int:
     v.add_argument("--no-holdout", action="store_true", help="skip the hand-written suites in [layout].holdout")
     c = sub.add_parser("clean")
     c.add_argument("--all", action="store_true")
-    for p in (a, g, s, v, c, i, d, sd, sr, sc, sl, sk, sa, q, an, rn, rp):
+    for p in (a, g, s, v, c, i, d, sd, sr, sc, sl, sk, sa, q, an, rn, rp, nw):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.cmd == "init":
         return cmd_init(args, Path(args.root).resolve() if args.root else Path.cwd())
+    if args.cmd == "new":
+        return cmd_new(args)
     root = Path(args.root).resolve() if args.root else find_root(Path.cwd())
     if not (root / "friend.toml").exists():
         print(f"no friend.toml in {root} or any parent directory. Start a project with `friend init`.", file=sys.stderr)

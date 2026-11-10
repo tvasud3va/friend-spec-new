@@ -10,6 +10,7 @@ the plan, so nothing here names a project-specific directory.
   saboteur  reads spec + mutant copies writes mutant copies                 → deliberately broken variants
   author    reads spec + testkit docs  writes spec/                         → drafts and edits the spec
   reviewer  reads spec + testkit docs  writes nothing                       → ambiguity questions
+  interviewer reads spec               writes nothing                       → questions about the idea
 """
 from __future__ import annotations
 
@@ -71,6 +72,14 @@ SCHEMAS = {
             "question": {"type": "string"},
             "why": {"type": "string", "description": "what could differ between implementations or tests"},
             "options": {"type": "array", "items": {"type": "string"}, "description": "empty for an open question"},
+            "recommendation": {"type": "string"}}}}}},
+    "interviewer": {"type": "object", "required": ["ready", "understanding", "questions"], "properties": {
+        "ready": {"type": "boolean", "description": "true when the remaining unknowns can be settled by unsurprising defaults"},
+        "understanding": {"type": "string", "description": "the product as agreed so far, as markdown bullets"},
+        "questions": {"type": "array", "items": {"type": "object", "required": ["question", "why", "options", "recommendation"], "properties": {
+            "question": {"type": "string"},
+            "why": {"type": "string"},
+            "options": {"type": "array", "items": {"type": "string"}},
             "recommendation": {"type": "string"}}}}}},
     "saboteur": {"type": "object", "required": ["mutants"], "properties": {
         "mutants": {"type": "array", "items": {"type": "object", "required": ["dir", "rule", "change"], "properties": {
@@ -149,6 +158,10 @@ def author(cfg: Config) -> Role:
 
 def reviewer(cfg: Config) -> Role:
     return Role("reviewer", "spec-review", READ_ONLY, read=[cfg.spec_dir, rel_or_abs(cfg.root, KIT / "README.md")])
+
+
+def interviewer(cfg: Config) -> Role:
+    return Role("interviewer", "interview", READ_ONLY, read=[cfg.spec_dir])
 
 
 def saboteur(cfg: Config, name: str, mutant_dirs: list[str]) -> Role:
