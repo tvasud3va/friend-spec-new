@@ -145,6 +145,7 @@ class Pipeline(unittest.TestCase):
         m = json.loads((p.dir / "clients/py/.generated.json").read_text())
         self.assertEqual(m["model"], "fake-model")
         self.assertIn("python", m["toolchain"])
+        self.assertEqual(st["run"]["tasks"]["interop"]["status"], "skipped")  # one target
 
     def test_approval_gates_pause_and_resume(self):
         p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})

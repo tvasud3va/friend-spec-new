@@ -1,12 +1,13 @@
 """The deterministic workflow. Agents write things; this module decides everything else.
 
-  plan ─► [approval] ─► tests ─► [approval] ─► build:<target> (one per target, sequential)
+  plan ─► [approval] ─► tests ─► [approval] ─► build:<target> (one per target, sequential) ─► interop
 
   plan    planner proposes targets → deterministic validation (retries) → plan.json
   tests   tester writes the suite → gates: imports, rule coverage, untestable limit, vacuity (fix rounds)
   build   prepare → implement → checking (build, suite, static gates) → repairing … → passed|failed|blocked
           disputed failing tests → arbiter → test_wrong: tester fixes test, suite re-gated and re-approved,
           every target re-checked | code_wrong: back to repair | spec_ambiguous: blocked
+  interop interop-tagged tests over every mixed assignment of targets to roles
 
 Every transition is persisted before the next action, so `generate` can resume after any crash.
 """
@@ -94,6 +95,7 @@ class Controller:
                 r.t(f"build:{name}")
             r.save()
             self.stage_builds(plan)
+            self.stage_interop(plan)
             final = "passed"
         except Stop as s:
             final = s.status
@@ -486,6 +488,27 @@ class Controller:
         for task, s in r.state["tasks"].items():   # every target is re-judged by the amended suite
             if task.startswith("build:") and s["status"] in ("passed", "checking"):
                 r.set(task, status="checking")
+
+    # ── stage: interop ──
+    def stage_interop(self, plan: dict) -> None:
+        r = self.run
+        if len(plan["targets"]) < 2:
+            return r.set("interop", status="skipped")
+        if r.t("interop")["status"] == "passed":
+            return
+        tests, _ = checks.list_suite(self.cfg)
+        if not any(t["interop"] for t in tests or []):
+            r.emit("step.skipped", task="interop", reason="the suite has no interop tests")
+            return r.set("interop", status="skipped")
+        r.set("interop", status="checking")
+        res = checks.run_suite(self.cfg, ["--interop", ",".join(plan["targets"])],
+                               lambda c: r.emit("test.case", task="interop", **{k: c[k] for k in ("name", "status", "rules", "duration_s", "detail")}))
+        r.emit("test.summary", task="interop", passed=res["passed"], failed=res["failed"])
+        r.t("interop")["last_checks"] = {"passed": res["passed"], "failed": res["failed"], "failures": res["failures"]}
+        if res["failed"] or not res["passed"]:
+            r.set("interop", status="failed", error=f"{res['failed']} interop tests failed" if res["passed"] else "no interop tests ran")
+            raise Stop("failed")
+        r.set("interop", status="passed")
 
 
 def preflight(cfg: Config) -> tuple[dict, list[str]]:

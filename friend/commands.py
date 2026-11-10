@@ -3,7 +3,7 @@
 
 Start here:
   friend spec approve            lint the spec (spec/, next to friend.toml) and record what you approved
-  friend generate                tests and code from the approved spec (plan → tests → build)
+  friend generate                tests and code from the approved spec (plan → tests → build → interop)
 
 More:
   friend spec lint | approve
