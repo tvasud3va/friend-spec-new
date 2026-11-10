@@ -1,0 +1,39 @@
+{
+  "run": 3,
+  "agent_ok": true,
+  "subtype": "success",
+  "cost_usd": 1.3375901999999997,
+  "turns": 38,
+  "agent_minutes": 6.1,
+  "model": "claude-opus-5-5",
+  "scores": {
+    "conformance:python": {
+      "passed": 17,
+      "failed": 0,
+      "failing": []
+    },
+    "conformance:typescript": {
+      "passed": 17,
+      "failed": 0,
+      "failing": []
+    },
+    "conformance:interop": {
+      "passed": 4,
+      "failed": 0
+    },
+    "generated:python": {
+      "passed": 53,
+      "failed": 0,
+      "failing": []
+    },
+    "generated:typescript": {
+      "passed": 53,
+      "failed": 0,
+      "failing": []
+    },
+    "generated:interop": {
+      "passed": 14,
+      "failed": 0
+    }
+  }
+}
