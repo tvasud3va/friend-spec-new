@@ -9,4 +9,7 @@ places (at most $max) where:
 
 Skip anything already decided, cosmetic wording, and implementation details the platform files leave open.
 For each, give the rule IDs concerned, the question, why it matters, 2-4 concrete options, and your
-recommendation, all precise enough for the spec author to apply. Order by impact.
+recommendation, all precise enough for the spec author to apply. Also give `plain`: the same question as the
+person would ask it, for someone who has never programmed: what situation it is about, with an everyday example
+("what if you type a message that's only spaces?"), short options in the same order, and a one-sentence
+recommendation. No rule IDs, code, character codes or library names in `plain`. Order by impact.

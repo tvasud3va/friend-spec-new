@@ -52,6 +52,7 @@ def add_questions(cfg: Config, new: list[dict], source: str, status: str = "open
         rules = q.get("rules") or ([r.strip() for r in q["rule"].split(",")] if q.get("rule") else [])
         item = {"id": f"Q{n}", "source": source, "rules": rules, "question": text, "why": q.get("why", ""),
                 "options": q.get("options", []), "recommendation": q.get("recommendation") or q.get("assumption", ""),
+                "plain": q.get("plain") or {},
                 "blocking": bool(q.get("blocking")),
                 "status": "open" if q.get("blocking") else status, "answer": None,
                 "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
@@ -131,18 +132,36 @@ def review(cfg: Config, sink, max_questions: int = 8) -> tuple[bool, list[dict]]
     return True, (res.output or {}).get("questions") or []
 
 
+def show(q: dict, plain: dict | None) -> None:
+    """A spec question, in plain words when the reviewer gave them, else the technical version with rule IDs."""
+    if plain:
+        print(f"\n{plain['question']}")
+        opts, rec = plain["options"], plain.get("recommendation")
+    else:
+        print(f"\n{q['id']} [{', '.join(q['rules']) or '-'}] {q['question']}")
+        if q.get("why"):
+            print(f"   why: {q['why']}")
+        opts, rec = q.get("options") or [], q.get("recommendation")
+    for i, opt in enumerate(opts, 1):
+        print(f"   {i}) {opt}")
+    if rec:
+        print(f"   recommended: {rec}")
+
+
 def interactive_answers(qs: list[dict], read: Callable[[str], str]) -> dict[str, tuple[str, str | None]]:
     """Ask the user about each open question. Returns {id: (status, answer)} for answered/dismissed ones."""
     decided: dict[str, tuple[str, str | None]] = {}
     for q in qs:
-        print(f"\n{q['id']} [{', '.join(q['rules']) or '-'}] {q['question']}")
-        if q.get("why"):
-            print(f"   why: {q['why']}")
-        for i, opt in enumerate(q.get("options") or [], 1):
-            print(f"   {i}) {opt}")
-        if q.get("recommendation"):
-            print(f"   recommended: {q['recommendation']}")
-        ans = read("   > number or your own words (Enter = recommended, s = skip): ").strip()
+        plain = q.get("plain") or {}
+        simple = bool(plain.get("question")) and len(plain.get("options") or []) == len(q.get("options") or [])
+        while True:
+            show(q, plain if simple else None)
+            ans = read("   > number or your own words (Enter = recommended" + (", ? = technical details" if simple else "")
+                       + ", s = skip): ").strip()
+            if ans == "?" and simple:
+                simple = False
+                continue
+            break
         if ans.lower() == "s":
             continue
         if ans.lower() == "d":

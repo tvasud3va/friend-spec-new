@@ -67,9 +67,14 @@ SCHEMAS = {
         "files_written": {"type": "array", "items": {"type": "string"}},
         "spec_questions": QUESTIONS}},
     "reviewer": {"type": "object", "required": ["questions"], "properties": {
-        "questions": {"type": "array", "items": {"type": "object", "required": ["rules", "question", "why", "options", "recommendation"], "properties": {
+        "questions": {"type": "array", "items": {"type": "object", "required": ["rules", "plain", "question", "why", "options", "recommendation"], "properties": {
             "rules": {"type": "array", "items": {"type": "string"}},
-            "question": {"type": "string"},
+            "plain": {"type": "object", "required": ["question", "options", "recommendation"], "description":
+                      "the same question for a non-programmer: everyday words, a concrete example, no jargon or code", "properties": {
+                "question": {"type": "string"},
+                "options": {"type": "array", "items": {"type": "string"}, "description": "one short line per option, same order"},
+                "recommendation": {"type": "string", "description": "which option and why, in one sentence"}}},
+            "question": {"type": "string", "description": "precise technical version, for the spec author"},
             "why": {"type": "string", "description": "what could differ between implementations or tests"},
             "options": {"type": "array", "items": {"type": "string"}, "description": "empty for an open question"},
             "recommendation": {"type": "string"}}}}}},
