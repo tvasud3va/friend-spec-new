@@ -1,0 +1,36 @@
+{
+  "generator": "friend",
+  "target": "typescript",
+  "run_id": "20261109-151642-1754",
+  "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
+  "plan_hash": "c13f7275201f40dd770c5edd36a67b8a0d5b914afab3c6950af3d793904aca28",
+  "tests_hash": "08fa2f1a2a56b77ddb518a84c75217891138569d8bb634effbc29ddd112e7423",
+  "session_id": "1b43f0a8-a6a2-4f12-903e-5d4714fe317c",
+  "model": "claude-opus-5-5",
+  "agent_cli": "2.1.314 (Claude Code)",
+  "toolchain": {
+    "python": "Python 3.12.2",
+    "node": "v20.20.0",
+    "tsc": "Version 5.6.3"
+  },
+  "generated_at": "2026-11-09T15:41:27",
+  "files": {
+    "TRACE.json": "505c1f85dddfabda515fbfe152fc0408e04e6e216b8c3e6f0b5da5f3bd60d449",
+    "dist/cli.js": "897288baaff35c8854272dd9e80c62427c936a325934cd062a9c4ea628e950ed",
+    "dist/client.js": "80f5cb1c7da594b4d722b75f99aa88784125fcba489d6b2663ff8e9ec2d2f3bd",
+    "dist/framing.js": "d261f78723731d03cfc8d3ba70dc0e521fc839ae9e538f97b4ff85b81b7549d7",
+    "dist/main.js": "1fc71259cde647928b260d4343daeb53f2f1a5a981eebebc80ae43b4972cf572",
+    "dist/output.js": "c50ce92752d813b96d0a169a1725fde6ad5a64ac08dbfccab346460acd49f634",
+    "dist/storage.js": "4b013a84f5ab70ccb1a76c287d870ef33dfefadc9d3154f372d3e0f34528e2b5",
+    "dist/validate.js": "885e7a4b12544b4a8d39787f42d2768c2cceeac066f92cccfcfc2890b7916166",
+    "package.json": "75310bff016b194c22167683f733bcd0991ba7d1d2a288c77763698eafecf4e8",
+    "src/cli.ts": "c442a9c67e684da1cb6e5485b00e89e5391bbfa5fec1f9fbb7239f75d15a8c8d",
+    "src/client.ts": "f85213576fc5871cd5c0159e60449a24f2231d0fad36bad3646f99f451f69dc2",
+    "src/framing.ts": "57107fe1584f51e851d1b1801665ac847eb4c5df956416038deece2f2dce8b77",
+    "src/main.ts": "bfe1ea76e8a01401b31f0e280ee4c992b46a8c5c75ebc49d5ee1062805e6bfb3",
+    "src/output.ts": "02a69db477c44106e77ac670f1b143cec24fbd1b2093bbf897d3f6f1f707f6b8",
+    "src/storage.ts": "e400b5d74386aaa4be27d3b5189b9828ed1f9270d447d706a25fdd011a24c137",
+    "src/validate.ts": "d3da308ac562179fe8ae231601a9a851edb738f8d98a13c2225acd4d316930b6",
+    "tsconfig.json": "4c7187ca146b85af18c0b2c4548028e0e3cf56d88077eda0178aeb3cbaa5eb16"
+  }
+}

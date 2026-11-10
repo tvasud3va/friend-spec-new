@@ -1,0 +1,105 @@
+{
+  "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
+  "run_id": "20261109-151642-1754",
+  "gates": "passed",
+  "untestable": [
+    {
+      "rule": "P-6",
+      "reason": "Server-only: the server must answer a non-JSON or type-less frame with bad_frame. A conforming client never sends one, so the client cannot show it. The client-side handling of junk frames is tested under C-21."
+    },
+    {
+      "rule": "P-12",
+      "reason": "Server-only: the client checks the name before connecting (C-5) and always sends protocol 1, so it never sends a hello with a bad name or protocol."
+    },
+    {
+      "rule": "P-16",
+      "reason": "Server-only: the client checks to and body with the same rules first (C-11), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17."
+    },
+    {
+      "rule": "P-17",
+      "reason": "Server-only: the client refuses to send to itself (C-11), so a self-addressed send never reaches the server."
+    },
+    {
+      "rule": "P-24",
+      "reason": "Server-only and silent: if the server ignores a delivered for an unknown id, nothing happens that the client could show."
+    },
+    {
+      "rule": "P-25",
+      "reason": "Server-only: a conforming client can never send a message to itself (C-11), so the server never has one to wrongly deliver to the sender."
+    }
+  ],
+  "report": {
+    "tests": 76,
+    "must_rules": 64,
+    "covered": [
+      "C-1",
+      "C-10",
+      "C-11",
+      "C-12",
+      "C-13",
+      "C-14",
+      "C-15",
+      "C-16",
+      "C-17",
+      "C-18",
+      "C-19",
+      "C-2",
+      "C-20",
+      "C-21",
+      "C-22",
+      "C-23",
+      "C-24",
+      "C-25",
+      "C-26",
+      "C-27",
+      "C-3",
+      "C-4",
+      "C-5",
+      "C-6",
+      "C-7",
+      "C-8",
+      "C-9",
+      "I-1",
+      "I-10",
+      "I-11",
+      "I-12",
+      "I-2",
+      "I-3",
+      "I-4",
+      "I-5",
+      "I-6",
+      "I-7",
+      "I-8",
+      "I-9",
+      "P-1",
+      "P-10",
+      "P-11",
+      "P-13",
+      "P-14",
+      "P-15",
+      "P-18",
+      "P-19",
+      "P-2",
+      "P-20",
+      "P-21",
+      "P-22",
+      "P-23",
+      "P-3",
+      "P-4",
+      "P-5",
+      "P-7",
+      "P-8",
+      "P-9"
+    ],
+    "untestable": {
+      "P-6": "Server-only: the server must answer a non-JSON or type-less frame with bad_frame. A conforming client never sends one, so the client cannot show it. The client-side handling of junk frames is tested under C-21.",
+      "P-12": "Server-only: the client checks the name before connecting (C-5) and always sends protocol 1, so it never sends a hello with a bad name or protocol.",
+      "P-16": "Server-only: the client checks to and body with the same rules first (C-11), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17.",
+      "P-17": "Server-only: the client refuses to send to itself (C-11), so a self-addressed send never reaches the server.",
+      "P-24": "Server-only and silent: if the server ignores a delivered for an unknown id, nothing happens that the client could show.",
+      "P-25": "Server-only: a conforming client can never send a message to itself (C-11), so the server never has one to wrongly deliver to the sender."
+    },
+    "uncovered": [],
+    "vacuous": []
+  }
+}

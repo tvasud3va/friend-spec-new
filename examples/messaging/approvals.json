@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
+    "approved_at": "2026-11-09T15:16:39",
+    "by": "human"
+  },
+  "plan": {
+    "hash": "c13f7275201f40dd770c5edd36a67b8a0d5b914afab3c6950af3d793904aca28",
+    "approved_at": "2026-11-09T15:16:56",
+    "by": "auto",
+    "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca"
+  },
+  "tests": {
+    "hash": "08fa2f1a2a56b77ddb518a84c75217891138569d8bb634effbc29ddd112e7423",
+    "approved_at": "2026-11-09T15:34:11",
+    "by": "auto",
+    "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca"
+  }
+}

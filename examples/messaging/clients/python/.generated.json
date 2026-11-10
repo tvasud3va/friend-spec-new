@@ -1,0 +1,26 @@
+{
+  "generator": "friend",
+  "target": "python",
+  "run_id": "20261109-151642-1754",
+  "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
+  "plan_hash": "c13f7275201f40dd770c5edd36a67b8a0d5b914afab3c6950af3d793904aca28",
+  "tests_hash": "08fa2f1a2a56b77ddb518a84c75217891138569d8bb634effbc29ddd112e7423",
+  "session_id": "6816488f-1663-45bf-ad11-d2c5cb1e536b",
+  "model": "claude-opus-5-5",
+  "agent_cli": "2.1.314 (Claude Code)",
+  "toolchain": {
+    "python": "Python 3.12.2",
+    "node": "v20.20.0",
+    "tsc": "Version 5.6.3"
+  },
+  "generated_at": "2026-11-09T15:37:50",
+  "files": {
+    "TRACE.json": "25db1eb6b0bca352fbcac23f2fc1ea916f00db488d59fb32787cfb9151b3b008",
+    "cli.py": "80d4742893c9ce52e0fff27f182cd8066d8ce4e03765363f998f0af9ac0bb8ca",
+    "client.py": "ea592487fcf365422f670033ba52a9b3e88dce4ae0d3861de5f1eef16a63372d",
+    "main.py": "64ad05232aabbdab6184f0eb691baf8766d108bf7fc3b10785744a58c6e6432f",
+    "output.py": "dd65728a7a5ad076d41370c537e808693fbce22f31ba26cca93c88c5f6a87c39",
+    "protocol.py": "58285f9aa05922a9b501b478b0127276230d6e400edff5417b429894f2070540",
+    "storage.py": "0715040ac1da2584fa6bfd9bdc2dcbb460802613e214679f6c28e6989b82f1a0"
+  }
+}
