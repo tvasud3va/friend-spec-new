@@ -354,6 +354,23 @@ class NewUserFlow(unittest.TestCase):
 
 
 class Operations(unittest.TestCase):
+    def test_budget_pauses_and_resumes(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
+        ev = p.generate("--yes", "--budget", "0.015", code=5)     # each fake step costs $0.01
+        self.assertIn("budget.exceeded", types(ev))
+        self.assertEqual(p.state()["run"]["status"], "paused")
+        ev = p.generate("--yes", "--budget", "100", code=0)
+        self.assertEqual(ev[0]["type"], "run.resumed")
+
+    def test_report_and_run(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
+        p.generate("--yes")
+        rep = p.friend("report", check_code=0).stdout
+        self.assertIn("build:py | passed", rep)
+        self.assertTrue((p.dir / ".friend/report.md").exists())
+        r = subprocess.run(MF + ["--root", str(p.dir), "run", "py"], input="upper hi\n", capture_output=True, text=True, env=p.env, timeout=30)
+        self.assertEqual(r.stdout.strip(), '{"echo": "HI"}')
+
     def test_reviewer_rejection_regenerates_with_feedback(self):
         p = Project({"planner": [{"output": PLAN_OUT}, {"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
         decisions = iter([("reject", "use py_compile, not compileall"), ("approve", ""), ("approve", "")])

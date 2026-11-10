@@ -78,11 +78,12 @@ class Stop(Exception):
 
 
 class Controller:
-    """reviewer(kind, summary, detail) -> ("approve" | "reject" | "quit", feedback): interactive approval, optional."""
+    """reviewer(kind, summary, detail) -> ("approve" | "reject" | "quit", feedback): interactive approval, optional.
+    budget_usd: total spend at which the run pauses (resumable), optional."""
 
-    def __init__(self, cfg: Config, run: Run, auto_approve: bool, reviewer=None) -> None:
+    def __init__(self, cfg: Config, run: Run, auto_approve: bool, reviewer=None, budget_usd: float | None = None) -> None:
         self.cfg, self.root, self.run, self.auto = cfg, cfg.root, run, auto_approve
-        self.reviewer = reviewer
+        self.reviewer, self.budget = reviewer, budget_usd
 
     # ── top level ──
     def execute(self) -> str:
@@ -123,6 +124,7 @@ class Controller:
             res = agent.invoke(self.cfg, role, r.dir, ts["session_id"], False, text, system_prompt(role.kind), log + "-new", emit)
         r.state["cost_usd"] += res.cost_usd
         ts["model"] = res.model or ts["model"]
+        over_budget = self.budget is not None and r.state["cost_usd"] >= self.budget
         for w in role.write:
             r.emit("files.changed", task=task, path=w, **checks.diff(before[w], checks.snapshot(self.root / w)))
         r.emit("step.finished", task=task, role=role.kind, subtype=res.subtype, turns=res.turns,
@@ -135,6 +137,9 @@ class Controller:
             ts["questions"] += questions
             r.emit("spec.questions", task=task, questions=questions)
         r.save()
+        if over_budget:
+            r.emit("budget.exceeded", spent=round(r.state["cost_usd"], 2), budget=self.budget)
+            raise Stop("paused")
         return res
 
     def crashed(self, task: str, res: agent.AgentResult) -> bool:

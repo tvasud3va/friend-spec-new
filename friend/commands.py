@@ -5,22 +5,25 @@ Start here:
   friend init                    scaffold a project; describe your idea in spec/BRIEF.md
   friend spec draft              an agent drafts the spec from the brief (then check, approve)
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
+  friend run TARGET [args…]      run what was built
 
 More:
+  friend doctor                  check Claude Code login, toolchains, spec and approvals
   friend spec draft | refine "…" | check | lint | approve
   friend questions · friend answer ID "decision" | --dismiss · friend answer all --recommended
-  friend status · friend approve spec|plan|tests
-  friend generate [--fresh] [--yes]
+  friend status · friend report · friend clean [--all] · friend approve spec|plan|tests
+  friend generate [--fresh] [--yes] [--budget USD]
 
 Global: --root DIR (default: nearest directory upwards with friend.toml), --json (machine output).
 Exit codes: 0 ok · 1 failed · 2 blocked on spec questions · 3 refused (config, preflight, approval, busy)
-            · 4 waiting for you (questions/approval) · 130 interrupted.
+            · 4 waiting for you (questions/approval) · 5 paused (budget) · 130 interrupted.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,7 +37,7 @@ import specflow  # noqa: E402
 from runstate import Run  # noqa: E402
 from speclib import lint  # noqa: E402
 
-EXIT = {"passed": 0, "failed": 1, "blocked": 2, "awaiting_approval": 4}
+EXIT = {"passed": 0, "failed": 1, "blocked": 2, "awaiting_approval": 4, "paused": 5}
 QUIET_TOOLS = {"Read", "Glob", "Grep"}
 
 
@@ -108,6 +111,8 @@ def human(ev: dict, verbose: bool) -> str | None:
             return f"== run {ev['run']} {ev['status'].upper()} · ${ev['cost_usd']} · " + ", ".join(f"{k}={v}" for k, v in ev["tasks"].items())
         case "approval.rejected":
             return f"{p}rejected {ev['artifact']}: regenerating with your feedback"
+        case "budget.exceeded":
+            return f"== paused: spent ${ev['spent']} of the ${ev['budget']} budget. Rerun with a higher --budget to continue"
     return None
 
 
@@ -186,7 +191,7 @@ def cmd_generate(args, cfg) -> int:
         auto = args.auto_approve or cfg["workflow"]["auto_approve"]
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.json
         try:
-            final = Controller(cfg, run, auto, reviewer=tty_reviewer if interactive else None).execute()
+            final = Controller(cfg, run, auto, reviewer=tty_reviewer if interactive else None, budget_usd=args.budget).execute()
         except KeyboardInterrupt:
             run.state["status"] = "interrupted"
             run.save()
@@ -196,8 +201,9 @@ def cmd_generate(args, cfg) -> int:
         finally:
             qs = [q for t in run.state["tasks"].values() for q in t.get("questions", [])]
             added = specflow.add_questions(cfg, qs, source=f"run {run.state['run_id']}")
-        if added and not args.json:
-            print(f"{len(added)} new spec questions: `friend questions`")
+            (mf_dir / "report.md").write_text(project.render_report(cfg, run))
+        if not args.json:
+            print(f"report: {mf_dir / 'report.md'}" + (f" · {len(added)} new spec questions: `friend questions`" if added else ""))
         return EXIT[final]
     finally:
         lock.unlink(missing_ok=True)
@@ -246,8 +252,55 @@ def cmd_status(args, cfg) -> int:
     return 0
 
 
+def cmd_clean(args, cfg) -> int:
+    root = cfg.path(cfg.generated_root)
+    if root.exists():
+        for d in sorted(root.iterdir()):
+            if d.is_dir():
+                shutil.rmtree(d)
+                print(f"removed {d.relative_to(cfg.root)}/")
+    if args.all:
+        for kind in ("plan", "tests"):
+            p = cfg.path(approvals.artifact_path(cfg, kind))
+            if p.is_dir():
+                shutil.rmtree(p)
+            elif p.exists():
+                p.unlink()
+            else:
+                continue
+            approvals.revoke(cfg, kind)
+            print(f"removed {approvals.artifact_path(cfg, kind)} (approval revoked)")
+    return 0
+
+
 def cmd_init(args, root: Path) -> int:
     return project.init(root, args.name, args.describe, args.lang or [], install=not args.no_install, force=args.force)
+
+
+def cmd_doctor(args, cfg) -> int:
+    rows = project.doctor(cfg)
+    if args.json:
+        print(json.dumps([{"check": c, "ok": ok, "detail": d} for c, ok, d in rows], indent=2))
+    else:
+        for c, ok, d in rows:
+            print(f"{'✓' if ok else '✗'} {c:18} {d}")
+    hard = [c for c, ok, _ in rows if not ok and not c.endswith("approval")]
+    return 0 if not hard else 1
+
+
+def cmd_run(args, cfg) -> int:
+    return project.run_target(cfg, args.target, args.args)
+
+
+def cmd_report(args, cfg) -> int:
+    run = Run.load(cfg.root / ".friend", args.run)
+    if run is None:
+        print("no runs yet", file=sys.stderr)
+        return 1
+    text = project.render_report(cfg, run)
+    (cfg.root / ".friend" / "report.md").write_text(text)
+    print(text)
+    return 0
 
 
 def show_spec_result(ok: bool, out: dict, problems: list[str], cfg, hint: bool = True) -> int:
@@ -390,6 +443,7 @@ def main() -> int:
     i.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
     i.add_argument("--no-install", action="store_true", help="don't run npm for the TypeScript compiler")
     i.add_argument("--force", action="store_true")
+    d = sub.add_parser("doctor")
     sp = sub.add_parser("spec")
     ssub = sp.add_subparsers(dest="spec_cmd", required=True)
     sd = ssub.add_parser("draft")
@@ -407,15 +461,23 @@ def main() -> int:
     an.add_argument("decision", nargs="?")
     an.add_argument("--dismiss", action="store_true")
     an.add_argument("--recommended", action="store_true", help="with ID 'all': accept every recommendation")
+    rn = sub.add_parser("run")
+    rn.add_argument("target")
+    rn.add_argument("args", nargs=argparse.REMAINDER)
+    rp = sub.add_parser("report")
+    rp.add_argument("--run")
     a = sub.add_parser("approve")
     a.add_argument("artifact", nargs="?", default="spec", choices=approvals.KINDS)
     g = sub.add_parser("generate")
     g.add_argument("--fresh", action="store_true", help="start a new run (new sessions) instead of resuming")
     g.add_argument("--auto-approve", "--yes", "-y", action="store_true", help="approve generated plan/tests automatically (unattended runs)")
+    g.add_argument("--budget", type=float, default=None, help="pause the run once total agent spend reaches this many USD")
     g.add_argument("-v", "--verbose", action="store_true")
     s = sub.add_parser("status")
     s.add_argument("--run")
-    for p in (a, g, s, i, sd, sr, sc, sl, sa, q, an):
+    c = sub.add_parser("clean")
+    c.add_argument("--all", action="store_true")
+    for p in (a, g, s, c, i, d, sd, sr, sc, sl, sa, q, an, rn, rp):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.cmd == "init":
@@ -429,8 +491,9 @@ def main() -> int:
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 3
-    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status, "spec": cmd_spec,
-            "questions": cmd_questions, "answer": cmd_answer}[args.cmd](args, cfg)
+    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status,
+            "clean": cmd_clean, "doctor": cmd_doctor, "spec": cmd_spec, "questions": cmd_questions,
+            "answer": cmd_answer, "run": cmd_run, "report": cmd_report}[args.cmd](args, cfg)
 
 
 if __name__ == "__main__":
