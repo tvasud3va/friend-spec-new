@@ -75,11 +75,12 @@ SCHEMAS = {
             "recommendation": {"type": "string"}}}}}},
     "interviewer": {"type": "object", "required": ["ready", "understanding", "questions"], "properties": {
         "ready": {"type": "boolean", "description": "true when the remaining unknowns can be settled by unsurprising defaults"},
+        "reply": {"type": "string", "description": "one or two conversational sentences to the person"},
         "understanding": {"type": "string", "description": "the product as agreed so far, as markdown bullets"},
         "questions": {"type": "array", "items": {"type": "object", "required": ["question", "why", "options", "recommendation"], "properties": {
             "question": {"type": "string"},
             "why": {"type": "string"},
-            "options": {"type": "array", "items": {"type": "string"}},
+            "options": {"type": "array", "items": {"type": "string"}, "description": "empty for an open question"},
             "recommendation": {"type": "string"}}}}}},
     "saboteur": {"type": "object", "required": ["mutants"], "properties": {
         "mutants": {"type": "array", "items": {"type": "object", "required": ["dir", "rule", "change"], "properties": {

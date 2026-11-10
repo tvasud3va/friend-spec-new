@@ -1,8 +1,10 @@
 """Project-level commands: init (scaffold), doctor (environment check), run (launch a target), report."""
 from __future__ import annotations
 
+import difflib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -70,6 +72,60 @@ def ask(prompt: str, default: str = "") -> str:
     return ans or default
 
 
+STOPWORDS = {"a", "an", "the", "i", "me", "my", "to", "for", "of", "and", "that", "which", "with", "in", "on",
+             "can", "use", "want", "build", "make", "app", "simple", "little", "from", "where", "it", "is", "lets",
+             "wanna", "gonna", "would", "like", "need", "just", "some", "something", "thing", "please", "really",
+             "basically", "kind", "sort", "so", "um", "id", "im", "create", "write", "program", "tool", "application"}
+
+
+def slug(text: str) -> str:
+    """A short folder name from an idea: 'a habit tracker I use from the terminal' -> 'habit-tracker-terminal'."""
+    words = [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOPWORDS]
+    return "-".join(words[:3]) or "my-app"
+
+
+def free_dir(parent: Path, name: str) -> Path:
+    """parent itself if it is empty, else parent/name (or name-2, name-3 … if taken)."""
+    if parent.is_dir() and not any(p for p in parent.iterdir() if not p.name.startswith(".")):
+        return parent
+    d, n = parent / name, 2
+    while d.exists() and any(d.iterdir()):
+        d, n = parent / f"{name}-{n}", n + 1
+    return d
+
+
+ALIASES = {"python": "python", "py": "python", "typescript": "typescript", "ts": "typescript",
+           "javascript": "javascript", "js": "javascript", "node": "javascript"}
+
+
+def parse_languages(text: str) -> list[str]:
+    """Languages named or numbered (1-based, in LANGUAGES order) anywhere in free text, in the order given."""
+    names = list(LANGUAGES)
+    found = []
+    for w in re.findall(r"[a-z]+|\d+", text.lower()):
+        close = difflib.get_close_matches(w, names, n=1, cutoff=0.75) if len(w) >= 4 else []
+        lang = names[int(w) - 1] if w.isdigit() and 0 < int(w) <= len(names) else ALIASES.get(w) or (close or [None])[0]
+        if lang and lang not in found:
+            found.append(lang)
+    return found
+
+
+def ask_languages(available: dict[str, bool]) -> list[str]:
+    """Numbered menu; accepts numbers or names in any phrasing, asks again until it understands."""
+    if not sys.stdin.isatty():
+        return ["python"] if available["python"] else [l for l, ok in available.items() if ok][:1]
+    print("Which language(s) should it be written in? Pick one or more, e.g. `1` or `1, 2`.")
+    for n, (l, ok) in enumerate(available.items(), 1):
+        print(f"  {n}) {l}{'' if ok else '  (not installed on this computer)'}")
+    while True:
+        langs = parse_languages(ask("Languages", "1"))
+        if langs and ask(f"  → {' and '.join(langs)}. Right? [Y/n]").lower() in ("", "y", "yes"):
+            return langs
+        if langs:
+            continue
+        print(f"  I didn't catch a language. Type numbers (like 1, 2) or names ({', '.join(LANGUAGES)}).")
+
+
 def detect() -> dict[str, bool]:
     return {lang: all(shutil.which(n) for n in spec["needs"]) for lang, spec in LANGUAGES.items()}
 
@@ -84,8 +140,7 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
     if describe is None:
         describe = ask("What are you building? (one or two sentences; used to draft the spec)", "")
     if not langs:
-        default = "python" if available["python"] else next((l for l, ok in available.items() if ok), "python")
-        langs = [l.strip() for l in ask(f"Target languages, comma-separated ({', '.join(LANGUAGES)})", default).split(",") if l.strip()]
+        langs = ask_languages(available)
     bad = [l for l in langs if l not in LANGUAGES]
     if bad or not langs:
         print(f"unknown or no languages {bad or langs}; choose from {sorted(LANGUAGES)}", file=sys.stderr)

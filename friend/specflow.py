@@ -209,6 +209,7 @@ def interview_round(cfg: Config, state: dict, languages: list[str], sink) -> boo
                                            "options": q.get("options", []), "recommendation": q.get("recommendation", ""),
                                            "answer": None} for i, q in enumerate(qs, 1)]})
     state["understanding"] = out["understanding"]
+    state["reply"] = out.get("reply", "")
     state["ready"] = bool(out.get("ready")) or not qs
     save_interview(cfg, state)
     return True
@@ -232,15 +233,18 @@ def ask_interview(qs: list[dict], read: Callable[[str], str]) -> tuple[dict[str,
     """Ask in the terminal. Returns (answers, stop) where stop means 'enough questions, write the spec'."""
     answers: dict[str, str] = {}
     for q in qs:
-        print(f"\n{q['id']}. {q['question']}")
-        if q.get("why"):
-            print(f"    why it matters: {q['why']}")
-        for i, opt in enumerate(q["options"], 1):
-            print(f"    {i}) {opt}")
-        if q.get("recommendation"):
-            print(f"    recommended: {q['recommendation']}")
-        a = read("    > number or your own words (Enter = recommended, d = done asking): ").strip()
-        if a.lower() in ("d", "done"):
+        print(f"\n{q['question']}")
+        if not q.get("options"):
+            a = read("  > ").strip()
+        else:
+            if q.get("why"):
+                print(f"  why it matters: {q['why']}")
+            for i, opt in enumerate(q["options"], 1):
+                print(f"    {i}) {opt}")
+            if q.get("recommendation"):
+                print(f"  recommended: {q['recommendation']}")
+            a = read("  > pick a number or say it your way (Enter = recommended): ").strip()
+        if a.lower() in ("done", "enough", "q"):
             return answers, True
         answers[q["id"]] = a
     return answers, False

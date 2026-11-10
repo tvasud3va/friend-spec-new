@@ -2,6 +2,7 @@
 """friend: describe an app, get interviewed, approve a spec, get independently tested implementations.
 
 Start here:
+  friend                         same as `friend new`: tell it your idea, it interviews you, then builds it
   friend new                     describe your idea, answer questions → approved spec + sprint contract
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
   friend verify                  prove the sprint contract: every check re-run, no agent → .friend/proof.md
@@ -403,14 +404,29 @@ def cmd_new(args) -> int:
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.json
     sink = make_quiet_sink(steps=False)
     if not (root / "friend.toml").exists():
-        idea = args.idea or (project.ask("What do you want to build? (one or two sentences)") if interactive else "")
+        idea = args.idea or (project.ask("What do you want to build? Describe it in your own words") if interactive else "")
         if not idea:
             print("describe your idea: friend new --idea \"...\" --lang python", file=sys.stderr)
             return 3
         args.idea = idea
-        code = project.init(root, args.name, idea, args.lang or [], install=not args.no_install, force=False, show_next=False)
+        if args.root:
+            root = Path(args.root).resolve()
+        else:
+            suggested = project.slug(idea)
+            name = args.name or project.ask("Folder name for it (press Enter to use the suggestion)", suggested) or suggested
+            root = project.free_dir(Path.cwd(), project.slug(name))
+            args.name = name
+        made = not root.exists()
+        root.mkdir(parents=True, exist_ok=True)
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+            code = project.init(root, args.name, idea, args.lang or [], install=not args.no_install, force=False, show_next=False)
         if code:
+            if made and not any(root.iterdir()):
+                root.rmdir()
             return code
+        if root != Path.cwd().resolve():
+            print(f"your project lives in {root}")
     try:
         cfg = load(root)
     except ConfigError as e:
@@ -442,7 +458,8 @@ def cmd_new(args) -> int:
                 if len(state["rounds"]) >= args.max_rounds:
                     state["ready"] = True
                     break
-                print("thinking about your idea …" if not state["rounds"] else "thinking about your answers …", flush=True)
+                print("thinking about your idea …" if not state["rounds"] else "thinking about your answers …", flush=True,
+                      file=sys.stderr if args.json else sys.stdout)
                 if not specflow.interview_round(cfg, state, langs, sink):
                     print("the interviewer failed (see .friend/spec/runs); run `friend new` again to retry", file=sys.stderr)
                     return 1
@@ -457,6 +474,10 @@ def cmd_new(args) -> int:
                               + (f"\n    recommended: {q['recommendation']}" if q.get("recommendation") else ""))
                     print('\nanswer with: friend new --answer I1=2 --answer I2="your words"   (or --done to stop asking)')
                 return 4
+            if len(state["rounds"]) == 1 and not any(q.get("answer") for q in state["rounds"][0]["questions"]):
+                print("(answer in your own words; type 'done' any time and I'll write the spec with what I have)")
+            if state.get("reply"):
+                print("\n" + state["reply"])
             answers, stop = specflow.ask_interview(qs, input)
             specflow.answer_interview(state, answers)
             state["ready"] = stop
@@ -516,7 +537,19 @@ def cmd_new(args) -> int:
         print(f"approved spec {rec['hash'][:12]}")
     if state["status"] != "approved":
         return 0
-    print("\nnext: friend generate   (builds tests and code; then `friend verify` proves the contract)")
+    here = cfg.root if cfg.root == Path.cwd().resolve() else None
+    cd = "" if here else f"cd {os.path.relpath(cfg.root)} && "
+    if interactive and input("\nbuild it now? this takes a while (20-40 min) [Y/n] > ").strip().lower() in ("", "y", "yes"):
+        code = cmd_generate(argparse.Namespace(json=False, verbose=False, fresh=False, auto_approve=True, budget=None), cfg)
+        if code == 0:
+            code = cmd_verify(argparse.Namespace(json=False, no_holdout=False), cfg)
+        if code == 0:
+            targets = sorted((load_plan(cfg) or {}).get("targets", {})) or ["TARGET"]
+            print(f"\ntry it: {cd}friend run {targets[0]} <arguments>   (built: {', '.join(targets)})")
+        else:
+            print(f"\nnot done yet; `{cd}friend generate` resumes where it stopped")
+        return code
+    print(f"\nnext: {cd}friend generate   (builds tests and code; then `friend verify` proves the contract)")
     return 0
 
 
@@ -692,14 +725,14 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="friend", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--root", default=None, help="project root (default: nearest directory upwards containing friend.toml)")
     ap.add_argument("--json", action="store_true")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
     i = sub.add_parser("init", help="scaffold a project in the current directory")
     i.add_argument("--name")
     i.add_argument("--describe", help="what you are building (written to spec/BRIEF.md)")
     i.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
     i.add_argument("--no-install", action="store_true", help="don't run npm for the TypeScript compiler")
     i.add_argument("--force", action="store_true")
-    nw = sub.add_parser("new", help="start here: describe your idea, answer questions, get an approved spec + contract")
+    nw = sub.add_parser("new", aliases=["idea"], help="start here: describe your idea, answer questions, get an approved spec + contract")
     nw.add_argument("--idea", help="what you want to build (asked interactively if omitted)")
     nw.add_argument("--name")
     nw.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
@@ -746,10 +779,10 @@ def main() -> int:
     c.add_argument("--all", action="store_true")
     for p in (a, g, s, v, c, i, d, sd, sr, sc, sl, sk, sa, q, an, rn, rp, nw):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    args = ap.parse_args()
+    args = ap.parse_args(sys.argv[1:] or ["new"])
     if args.cmd == "init":
         return cmd_init(args, Path(args.root).resolve() if args.root else Path.cwd())
-    if args.cmd == "new":
+    if args.cmd in ("new", "idea"):
         return cmd_new(args)
     root = Path(args.root).resolve() if args.root else find_root(Path.cwd())
     if not (root / "friend.toml").exists():
