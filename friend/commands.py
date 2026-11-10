@@ -4,6 +4,7 @@
 Start here:
   friend                         same as `friend new`: tell it your idea, it interviews you, then builds it
   friend new                     describe your idea, answer questions → approved spec + sprint contract
+  friend new --from spec.md      start from a spec you already wrote: friend splits it into its layout
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
   friend verify                  prove the sprint contract: every check re-run, no agent → .friend/proof.md
   friend run TARGET [args…]      run what was built
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -403,16 +405,27 @@ def cmd_new(args) -> int:
     root = Path(args.root).resolve() if args.root else find_root(Path.cwd())
     interactive = sys.stdin.isatty() and sys.stdout.isatty() and not args.json
     sink = make_quiet_sink(steps=False)
+    doc = project.document(args.source) if args.source else None
+    if args.source and not doc:
+        print(f"no such file: {args.source}", file=sys.stderr)
+        return 3
+    if doc and (root / "friend.toml").exists() and (root != Path.cwd().resolve() or any((root / "spec/core").glob("*.md"))):
+        print(f"you are inside the friend project {root}; importing here would overwrite its spec.\n"
+              f"run it from another folder: cd ~ && friend new --from {doc}", file=sys.stderr)
+        return 3
     if not (root / "friend.toml").exists():
-        idea = args.idea or (project.ask("What do you want to build? Describe it in your own words") if interactive else "")
+        idea = args.idea or ("" if doc else project.ask(
+            "What do you want to build? Describe it in your own words (or drag in a spec file)") if interactive else "")
+        doc = doc or project.document(idea)
+        idea = doc.read_text() if doc else idea
         if not idea:
-            print("describe your idea: friend new --idea \"...\" --lang python", file=sys.stderr)
+            print("describe your idea: friend new --idea \"...\" --lang python  (or: friend new --from spec.md)", file=sys.stderr)
             return 3
         args.idea = idea
         if args.root:
             root = Path(args.root).resolve()
         else:
-            suggested = project.slug(idea)
+            suggested = project.slug(project.title(idea) or doc.stem) if doc else project.slug(idea)
             name = args.name or project.ask("Folder name for it (press Enter to use the suggestion)", suggested) or suggested
             root = project.free_dir(Path.cwd(), project.slug(name))
             args.name = name
@@ -420,7 +433,8 @@ def cmd_new(args) -> int:
         root.mkdir(parents=True, exist_ok=True)
         import contextlib
         with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
-            code = project.init(root, args.name, idea, args.lang or [], install=not args.no_install, force=False, show_next=False)
+            code = project.init(root, args.name, idea, args.lang or [], install=not args.no_install, force=False, show_next=False,
+                                suggest=project.parse_languages(" ".join(re.findall(r"(?im)^#+.*platform.*$", idea))) if doc else None)
         if code:
             if made and not any(root.iterdir()):
                 root.rmdir()
@@ -436,13 +450,16 @@ def cmd_new(args) -> int:
     state = specflow.load_interview(cfg)
     if state is None:
         brief = cfg.path(cfg.spec_dir) / "BRIEF.md"
-        idea = args.idea or (brief.read_text().split("\n", 2)[-1].strip() if brief.exists() else "")
+        idea = doc.read_text() if doc else args.idea or (brief.read_text().split("\n", 2)[-1].strip() if brief.exists() else "")
         if not idea or "(describe the application here" in idea:
             idea = project.ask("What do you want to build? Describe it in your own words") if interactive else ""
         if not idea:
             print("describe your idea: friend new --idea \"...\"", file=sys.stderr)
             return 3
         state = specflow.new_interview(idea)
+        if doc:
+            specflow.write_document_brief(cfg, cfg.raw.get("project", {}).get("name") or cfg.root.name, doc, state)
+            print(f"read your spec ({len(idea.splitlines())} lines from {doc.name}); no interview needed")
         specflow.save_interview(cfg, state)
     langs = [Path(p).stem for p in platform_spec_files(cfg.root, cfg.spec_dir)]
 
@@ -734,6 +751,7 @@ def main() -> int:
     i.add_argument("--force", action="store_true")
     nw = sub.add_parser("new", aliases=["idea"], help="start here: describe your idea, answer questions, get an approved spec + contract")
     nw.add_argument("--idea", help="what you want to build (asked interactively if omitted)")
+    nw.add_argument("--from", dest="source", metavar="FILE", help="start from a spec you already wrote (skips the interview)")
     nw.add_argument("--name")
     nw.add_argument("--lang", action="append", help="target language (repeatable): python, typescript, javascript")
     nw.add_argument("--answer", action="append", default=[], help="non-interactive: ID=answer (option number or text)")

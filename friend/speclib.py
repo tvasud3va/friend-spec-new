@@ -25,8 +25,8 @@ class Rule:
 
 
 def all_spec_files(root: Path, spec_dir: str) -> list[Path]:
-    """Every file that can hold rules."""
-    return sorted(p for p in (root / spec_dir).rglob("*.md") if p.is_file())
+    """Every file that can hold rules. BRIEF.md is context, not requirements (it may quote an imported spec)."""
+    return sorted(p for p in (root / spec_dir).rglob("*.md") if p.is_file() and p != root / spec_dir / "BRIEF.md")
 
 
 def behaviour_spec_files(root: Path, spec_dir: str) -> list[Path]:

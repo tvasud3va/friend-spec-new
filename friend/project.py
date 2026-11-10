@@ -75,13 +75,29 @@ def ask(prompt: str, default: str = "") -> str:
 STOPWORDS = {"a", "an", "the", "i", "me", "my", "to", "for", "of", "and", "that", "which", "with", "in", "on",
              "can", "use", "want", "build", "make", "app", "simple", "little", "from", "where", "it", "is", "lets",
              "wanna", "gonna", "would", "like", "need", "just", "some", "something", "thing", "please", "really",
-             "basically", "kind", "sort", "so", "um", "id", "im", "create", "write", "program", "tool", "application"}
+             "basically", "kind", "sort", "so", "um", "id", "im", "create", "write", "program", "tool", "application",
+             "spec", "specification"}
 
 
 def slug(text: str) -> str:
     """A short folder name from an idea: 'a habit tracker I use from the terminal' -> 'habit-tracker-terminal'."""
     words = [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in STOPWORDS]
     return "-".join(words[:3]) or "my-app"
+
+
+def document(text: str) -> Path | None:
+    """The file a typed or drag-and-dropped answer points at (quotes and escaped spaces allowed), else None."""
+    t = text.strip().strip("'\"").replace("\\ ", " ")
+    if not t or "\n" in t or len(t) > 1024:
+        return None
+    p = Path(t).expanduser()
+    return p.resolve() if p.is_file() else None
+
+
+def title(text: str) -> str:
+    """The first Markdown heading, without words like 'specification'."""
+    m = re.search(r"^#\s+(.+)$", text, re.M)
+    return re.sub(r"(?i)\b(spec(ification)?|requirements|prd)\b", "", m[1]) if m else ""
 
 
 def free_dir(parent: Path, name: str) -> Path:
@@ -110,15 +126,16 @@ def parse_languages(text: str) -> list[str]:
     return found
 
 
-def ask_languages(available: dict[str, bool]) -> list[str]:
+def ask_languages(available: dict[str, bool], suggest: list[str] | None = None) -> list[str]:
     """Numbered menu; accepts numbers or names in any phrasing, asks again until it understands."""
     if not sys.stdin.isatty():
-        return ["python"] if available["python"] else [l for l, ok in available.items() if ok][:1]
+        return suggest or (["python"] if available["python"] else [l for l, ok in available.items() if ok][:1])
     print("Which language(s) should it be written in? Pick one or more, e.g. `1` or `1, 2`.")
     for n, (l, ok) in enumerate(available.items(), 1):
         print(f"  {n}) {l}{'' if ok else '  (not installed on this computer)'}")
     while True:
-        langs = parse_languages(ask("Languages", "1"))
+        default = ", ".join(str(list(available).index(l) + 1) for l in suggest) if suggest else "1"
+        langs = parse_languages(ask("Languages", default))
         if langs and ask(f"  → {' and '.join(langs)}. Right? [Y/n]").lower() in ("", "y", "yes"):
             return langs
         if langs:
@@ -131,7 +148,7 @@ def detect() -> dict[str, bool]:
 
 
 def init(root: Path, name: str | None, describe: str | None, langs: list[str], install: bool, force: bool,
-         show_next: bool = True) -> int:
+         show_next: bool = True, suggest: list[str] | None = None) -> int:
     if (root / "friend.toml").exists() and not force:
         print(f"{root}/friend.toml already exists (use --force to overwrite the scaffold)", file=sys.stderr)
         return 3
@@ -140,7 +157,7 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
     if describe is None:
         describe = ask("What are you building? (one or two sentences; used to draft the spec)", "")
     if not langs:
-        langs = ask_languages(available)
+        langs = ask_languages(available, suggest)
     bad = [l for l in langs if l not in LANGUAGES]
     if bad or not langs:
         print(f"unknown or no languages {bad or langs}; choose from {sorted(LANGUAGES)}", file=sys.stderr)

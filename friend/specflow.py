@@ -269,6 +269,15 @@ def ask_interview(qs: list[dict], read: Callable[[str], str]) -> tuple[dict[str,
     return answers, False
 
 
+def write_document_brief(cfg: Config, name: str, doc: Path, state: dict) -> Path:
+    """A spec the person already wrote: it becomes the brief verbatim, and the interview is skipped."""
+    p = cfg.path(cfg.spec_dir) / "BRIEF.md"
+    p.write_text(f"# Brief: {name}\n\nImported from `{doc.name}`. This is the person's own specification: it is the "
+                 f"source of truth for every requirement below.\n\n---\n\n{doc.read_text().strip()}\n")
+    state.update(status="briefed", ready=True, source=str(doc), understanding=f"(imported from {doc.name})")
+    return p
+
+
 def write_brief(cfg: Config, name: str, state: dict) -> Path:
     p = cfg.path(cfg.spec_dir) / "BRIEF.md"
     qa = "\n".join(f"- **{q}**  \n  {a}" for q, a in transcript(state))

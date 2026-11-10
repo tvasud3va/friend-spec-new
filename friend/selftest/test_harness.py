@@ -406,6 +406,27 @@ class NewUserFlow(unittest.TestCase):
         self.assertIn("only `upper ` lines", [c for c in calls if c["role"] == "interviewer"][-1]["prompt"])
         self.assertEqual(run_mf(self.dir, "spec", "approve", env=self.env).returncode, 0)
 
+    def test_new_from_a_written_spec_skips_the_interview(self):
+        self.init()
+        doc = self.dir.parent / f"{self.dir.name}-spec.md"
+        doc.write_text("# Echo tool specification\n\n- **E-1** (MUST) Lines are echoed back.\n")
+        self.addCleanup(doc.unlink)
+        self.scenario_is({"author": [{"write": {"spec/core/interface.md": INTERFACE, "spec/core/echo.md": SPEC_CORE,
+                                                "spec/DONE.md": DONE}}]})
+        r = run_mf(self.dir, "new", "--from", str(doc), env=self.env)
+        self.assertEqual(r.returncode, 4, r.stdout + r.stderr)                    # spec drafted, awaiting approval
+        self.assertIn("no interview needed", r.stdout)
+        self.assertIn("**E-1** (MUST) Lines are echoed back.", (self.dir / "spec/BRIEF.md").read_text())
+        roles = [json.loads(l)["role"] for l in self.scenario.with_suffix(".calls").read_text().splitlines()]
+        self.assertNotIn("interviewer", roles)
+        self.assertEqual(run_mf(self.dir, "new", "--from", str(doc) + ".missing", env=self.env).returncode, 3)
+        before = (self.dir / "spec/DONE.md").read_text()
+        for where in (self.dir, self.dir / "spec"):                               # never import over an existing spec
+            r = run_mf(where, "new", "--from", str(doc), env=self.env)
+            self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+            self.assertIn("would overwrite its spec", r.stderr)
+        self.assertEqual((self.dir / "spec/DONE.md").read_text(), before)
+
     def test_contract_must_cite_existing_rules(self):
         self.init()
         (self.dir / "spec/core/interface.md").write_text(INTERFACE)
