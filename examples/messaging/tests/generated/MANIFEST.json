@@ -1,6 +1,6 @@
 {
-  "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
-  "run_id": "20261109-151642-1754",
+  "spec_hash": "3e425447f2a7442188c1b49bb2fb3d9cfd1d39e53b94194a772b918c39e297a6",
+  "run_id": "20261109-155634-f818",
   "gates": "passed",
   "untestable": [
     {
@@ -13,7 +13,7 @@
     },
     {
       "rule": "P-16",
-      "reason": "Server-only: the client checks to and body with the same rules first (C-11), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17."
+      "reason": "Server-only: the client checks to and body with the same rules first (C-11, and X001-5 for group sends), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17."
     },
     {
       "rule": "P-17",
@@ -26,11 +26,15 @@
     {
       "rule": "P-25",
       "reason": "Server-only: a conforming client can never send a message to itself (C-11), so the server never has one to wrongly deliver to the sender."
+    },
+    {
+      "rule": "X001-9",
+      "reason": "Server-only: this is server validation and forwarding of group/members. A conforming client only sends valid group frames (X001-5, X001-8), so it never triggers invalid_group. The only server available to tests is the core-protocol server, so whether group/members reach deliver frames can't be observed end to end. The client side is covered by X001-8 (send frames), X001-10/X001-11 (receiving group delivers from a scripted peer) and C-17 (an error carrying an id, used in group_human_mode with code invalid_group)."
     }
   ],
   "report": {
-    "tests": 76,
-    "must_rules": 64,
+    "tests": 87,
+    "must_rules": 75,
     "covered": [
       "C-1",
       "C-10",
@@ -89,15 +93,26 @@
       "P-5",
       "P-7",
       "P-8",
-      "P-9"
+      "P-9",
+      "X001-1",
+      "X001-10",
+      "X001-11",
+      "X001-2",
+      "X001-3",
+      "X001-4",
+      "X001-5",
+      "X001-6",
+      "X001-7",
+      "X001-8"
     ],
     "untestable": {
       "P-6": "Server-only: the server must answer a non-JSON or type-less frame with bad_frame. A conforming client never sends one, so the client cannot show it. The client-side handling of junk frames is tested under C-21.",
       "P-12": "Server-only: the client checks the name before connecting (C-5) and always sends protocol 1, so it never sends a hello with a bad name or protocol.",
-      "P-16": "Server-only: the client checks to and body with the same rules first (C-11), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17.",
+      "P-16": "Server-only: the client checks to and body with the same rules first (C-11, and X001-5 for group sends), so the server never sees an invalid send. How the client handles a server error that carries an id is tested under C-17.",
       "P-17": "Server-only: the client refuses to send to itself (C-11), so a self-addressed send never reaches the server.",
       "P-24": "Server-only and silent: if the server ignores a delivered for an unknown id, nothing happens that the client could show.",
-      "P-25": "Server-only: a conforming client can never send a message to itself (C-11), so the server never has one to wrongly deliver to the sender."
+      "P-25": "Server-only: a conforming client can never send a message to itself (C-11), so the server never has one to wrongly deliver to the sender.",
+      "X001-9": "Server-only: this is server validation and forwarding of group/members. A conforming client only sends valid group frames (X001-5, X001-8), so it never triggers invalid_group. The only server available to tests is the core-protocol server, so whether group/members reach deliver frames can't be observed end to end. The client side is covered by X001-8 (send frames), X001-10/X001-11 (receiving group delivers from a scripted peer) and C-17 (an error carrying an id, used in group_human_mode with code invalid_group)."
     },
     "uncovered": [],
     "vacuous": []

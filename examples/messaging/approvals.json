@@ -1,19 +1,937 @@
 {
   "spec": {
-    "hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
-    "approved_at": "2026-11-09T15:16:39",
+    "hash": "3e425447f2a7442188c1b49bb2fb3d9cfd1d39e53b94194a772b918c39e297a6",
+    "approved_at": "2026-11-09T15:56:33",
     "by": "human"
   },
   "plan": {
-    "hash": "c13f7275201f40dd770c5edd36a67b8a0d5b914afab3c6950af3d793904aca28",
-    "approved_at": "2026-11-09T15:16:56",
-    "by": "auto",
-    "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca"
+    "hash": "d6eca15ab2a080d946b9f1bc8342ea0c81947a1167cad5c3d6577fef9a4885e5",
+    "approved_at": "2026-11-09T15:56:34",
+    "by": "carried",
+    "note": "unchanged targets, carried from spec dbd458368043",
+    "spec_hash": "3e425447f2a7442188c1b49bb2fb3d9cfd1d39e53b94194a772b918c39e297a6"
   },
   "tests": {
-    "hash": "08fa2f1a2a56b77ddb518a84c75217891138569d8bb634effbc29ddd112e7423",
-    "approved_at": "2026-11-09T15:34:11",
+    "hash": "50bbe9bd76d4f6cb1f73c4f193179baee636fc32d845fd4dc618856a3f296b2e",
+    "approved_at": "2026-11-09T16:16:07",
     "by": "auto",
-    "spec_hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca"
-  }
+    "spec_hash": "3e425447f2a7442188c1b49bb2fb3d9cfd1d39e53b94194a772b918c39e297a6"
+  },
+  "spec_history": [
+    {
+      "hash": "dbd4583680439c103ef7bf24fcd65c8982157b53dfa39974d83d58800d824fca",
+      "rules": {
+        "C-1": {
+          "level": "MUST",
+          "text": "`user`, `outbox` and `inbox` are stored durably in the data directory and survive process exit, including a kill without warning.",
+          "file": "spec/core/client.md"
+        },
+        "C-2": {
+          "level": "MUST",
+          "text": "A state change is durably written **before** the event reporting it is emitted, and before any frame that depends on it is sent (e.g. an inbox write happens before `delivered`).",
+          "file": "spec/core/client.md"
+        },
+        "C-3": {
+          "level": "MUST",
+          "text": "On start the client loads its state, then emits `started` with the stored user (or `null`). It emits no other event before `started`.",
+          "file": "spec/core/client.md"
+        },
+        "C-4": {
+          "level": "MUST",
+          "text": "On start with a stored user, the client begins connecting immediately (C-7). It never asks for the name again: login happens once per data directory.",
+          "file": "spec/core/client.md"
+        },
+        "C-5": {
+          "level": "MUST",
+          "text": "`login <name>` when no user is stored: validate the name (P-7, else error `invalid_name`), persist it, emit `logged_in`, then begin connecting.",
+          "file": "spec/core/client.md"
+        },
+        "C-6": {
+          "level": "MUST",
+          "text": "`login` when a user is already stored emits error `already_logged_in` and changes nothing.",
+          "file": "spec/core/client.md"
+        },
+        "C-7": {
+          "level": "MUST",
+          "text": "While a user is stored and the client is not ONLINE or CONNECTING (and not STOPPED), it attempts a TCP connection. If the attempt fails, or an established connection closes for any reason, it waits 500 ms and tries again, indefinitely.",
+          "file": "spec/core/client.md"
+        },
+        "C-8": {
+          "level": "MUST",
+          "text": "After the TCP connection opens the client sends `hello {user, protocol: 1}` and becomes ONLINE only when it receives `welcome`.",
+          "file": "spec/core/client.md"
+        },
+        "C-27": {
+          "level": "MUST",
+          "text": "If `welcome` has not been received 5 seconds after the TCP connection opened, the client closes the connection and retries per C-7 (wait 500 ms, then a new attempt). This emits no event (C-9: leaving CONNECTING is silent).",
+          "file": "spec/core/client.md"
+        },
+        "C-9": {
+          "level": "MUST",
+          "text": "The client emits `status {online: true}` on entering ONLINE and `status {online: false}` on leaving ONLINE. It emits nothing for failed attempts or for leaving CONNECTING. The client starts OFFLINE without emitting a status event.",
+          "file": "spec/core/client.md"
+        },
+        "C-10": {
+          "level": "MUST",
+          "text": "On error `replaced` the client emits `error {code: \"replaced\", detail}` (detail per C-26), closes the connection (emitting `status {online:false}` if it was ONLINE), enters STOPPED and makes no further connection attempts until the process restarts.",
+          "file": "spec/core/client.md"
+        },
+        "C-11": {
+          "level": "MUST",
+          "text": "`send <to> <body>` validates in this order, emitting the first failing error and queuing nothing: no stored user \u2192 `not_logged_in`; `to` invalid (P-7) or equal to own name \u2192 `invalid_recipient`; body invalid (P-8) \u2192 `invalid_body`.",
+          "file": "spec/core/client.md"
+        },
+        "C-12": {
+          "level": "MUST",
+          "text": "A valid send creates a new message ID (P-9), appends `{id, to, body}` to the outbox, persists it, then emits `queued`. This is the same whether ONLINE or not.",
+          "file": "spec/core/client.md"
+        },
+        "C-13": {
+          "level": "MUST",
+          "text": "On entering ONLINE the client transmits a `send` frame for every outbox entry, in outbox order, immediately after receiving `welcome`. While ONLINE, a newly queued entry is transmitted immediately.",
+          "file": "spec/core/client.md"
+        },
+        "C-14": {
+          "level": "MUST",
+          "text": "An entry is removed from the outbox only when an `ack` with its `id` arrives: remove, persist, then emit `sent {id, seq}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-15": {
+          "level": "MUST",
+          "text": "Entries not acked when a connection closes stay in the outbox, keep their `id`, and are retransmitted by C-13 on the next connection. The client never generates a new ID for a retry.",
+          "file": "spec/core/client.md"
+        },
+        "C-16": {
+          "level": "MUST",
+          "text": "An `ack` for an `id` not in the outbox is ignored.",
+          "file": "spec/core/client.md"
+        },
+        "C-17": {
+          "level": "MUST",
+          "text": "An `error` frame whose `id` matches an outbox entry removes that entry (persisted) and emits `failed {id, code}`. The entry is not retried.",
+          "file": "spec/core/client.md"
+        },
+        "C-18": {
+          "level": "MUST",
+          "text": "On `deliver`: if no inbox entry has that `id`, append the message to the inbox, persist, and emit `message`. Whether new or duplicate, the client then sends `delivered {id}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-19": {
+          "level": "MUST",
+          "text": "A duplicate `deliver` (same `id`) never produces a second `message` event or a second inbox entry.",
+          "file": "spec/core/client.md"
+        },
+        "C-20": {
+          "level": "MUST",
+          "text": "`error` frames from the server that match no outbox entry and are not `replaced` are reported as `error {code: <server code>, detail}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-21": {
+          "level": "MUST",
+          "text": "Frames that are not valid JSON objects with a `type` are ignored.",
+          "file": "spec/core/client.md"
+        },
+        "C-24": {
+          "level": "MUST",
+          "text": "While CONNECTING (after `hello`, before `welcome`) the client handles only `welcome` and `error` frames; any other frame is ignored (no event, no `delivered`).",
+          "file": "spec/core/client.md"
+        },
+        "C-25": {
+          "level": "MUST",
+          "text": "A `deliver` frame is processed only if `id`, `from`, `to` and `body` are strings and `seq` is an integer; otherwise it is ignored entirely (no event, no `delivered`). An `ack` is processed only if `id` is a string and `seq` an integer.",
+          "file": "spec/core/client.md"
+        },
+        "C-26": {
+          "level": "MUST",
+          "text": "An `error` frame is processed only if `code` is a string; otherwise it is ignored entirely (no event, no state change). When processed, `detail` is taken as `\"\"` if it is missing or not a string, and `id` is treated as absent unless it is a string (so it matches no outbox entry, C-17). This applies to every `error` path: `replaced` (C-10), failures (C-17) and pass-through errors (C-20).",
+          "file": "spec/core/client.md"
+        },
+        "C-22": {
+          "level": "MUST",
+          "text": "`queued` events appear in command order; `sent` events for messages queued by one client appear in outbox order.",
+          "file": "spec/core/client.md"
+        },
+        "C-23": {
+          "level": "MUST",
+          "text": "`message` events appear in the order the server delivered them.",
+          "file": "spec/core/client.md"
+        },
+        "I-1": {
+          "level": "MUST",
+          "text": "The client is launched with the command given in its platform spec, plus these options in any order:",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-2": {
+          "level": "MUST",
+          "text": "An unknown option, a missing option value, a malformed `--server`, or any positional (non-option) word (e.g. `main.py foo`) prints a usage message to stderr and exits with code 2. Options are separate words (`--server 127.0.0.1:7070`); the `--opt=value` form is an unknown option. An option given more than once is not an error: the last occurrence wins (`--server a:1 --server b:2` uses `b:2`).",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-11": {
+          "level": "MUST",
+          "text": "`--server` is well-formed iff it is `HOST:PORT` where HOST is non-empty and contains no `:` (IPv6 literals are not supported), and PORT matches `^[0-9]+$` (ASCII digits only; no sign, no whitespace) with numeric value 1\u201365535. Leading zeros are allowed (`host:07070` is port 7070); `host:+80` and `host:0` are malformed.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-3": {
+          "level": "MUST",
+          "text": "Commands are read from stdin, one per line. Lines end **only** at `\\n`; one `\\r` immediately before `\\n` is stripped; any other `\\r` is part of the line (and so of a message body). Note that common line readers also split on a lone `\\r` and must not be used as-is. Each line's bytes are decoded as UTF-8 with replacement: every ill-formed sequence becomes U+FFFD and the text is processed normally; invalid UTF-8 never crashes the client or rejects the line by itself. A leading U+FEFF is kept as part of the line. End of stdin behaves like `quit`.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-4": {
+          "level": "MUST",
+          "text": "`quit` closes the connection and exits with code 0. Durable state is already persisted (C-2), so no extra flush is required.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-5": {
+          "level": "MUST",
+          "text": "Every output line is written to stdout and flushed immediately. Diagnostics go to stderr only.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-6": {
+          "level": "MUST",
+          "text": "A line that is empty (zero length after the I-3 `\\r` stripping) is ignored. Every other line is parsed literally, with no trimming: a line of only spaces or with leading spaces (`   `, ` login alice`) has an empty or unknown command word. Command words are case-sensitive (`LOGIN alice`). An unknown command word emits error `unknown_command`.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-12": {
+          "level": "MUST",
+          "text": "Argument parsing happens before any state check (login state, validation), so a malformed command always emits `bad_arguments`, even when not logged in:",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-13": {
+          "level": "MAY",
+          "text": "The `detail` of locally generated errors is free-form help text (may be empty). Observers must not depend on it.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-7": {
+          "level": "MUST",
+          "text": "Commands are processed in the order read. A command's own events are emitted before the next command is processed. `inbox`/`outbox` reflect all previously processed commands and all frames already handled.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-8": {
+          "level": "MUST",
+          "text": "In `--json` mode each stdout line is exactly one JSON object with a string field `event`, using exactly these shapes (field order is not significant; extensions may add fields):",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-9": {
+          "level": "MUST",
+          "text": "Local error codes: `not_logged_in`, `already_logged_in`, `invalid_name`, `invalid_recipient`, `invalid_body`, `unknown_command`, `bad_arguments`. Server error codes are passed through (C-20).",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-10": {
+          "level": "MUST",
+          "text": "Without `--json`, each event is printed as one line using these templates (`{x}` is substituted verbatim):",
+          "file": "spec/core/control-interface.md"
+        },
+        "P-1": {
+          "level": "MUST",
+          "text": "Transport is TCP. Default server address is `127.0.0.1:7070`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-2": {
+          "level": "MUST",
+          "text": "Each frame is one JSON object encoded as UTF-8, followed by a single `\\n` (0x0A). Frames contain no raw newlines.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-3": {
+          "level": "MUST",
+          "text": "Every frame has a string field `type`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-4": {
+          "level": "MUST",
+          "text": "Receivers ignore object fields they do not recognise (forward compatibility for extensions).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-5": {
+          "level": "MUST",
+          "text": "A client that receives a frame with an unrecognised `type` ignores it. The server answers an unrecognised `type` with `error` code `unknown_type` and keeps the connection open.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-6": {
+          "level": "MUST",
+          "text": "A frame that is not valid JSON or lacks `type` is answered by the server with `error` code `bad_frame`; the connection stays open.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-7": {
+          "level": "MUST",
+          "text": "A user name matches `^[A-Za-z0-9_-]{1,32}$`. Names are case-sensitive (`Alice` \u2260 `alice`).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-8": {
+          "level": "MUST",
+          "text": "A message body is a string of 1\u20134000 Unicode code points (not bytes, not UTF-16 units) and contains at least one non-whitespace character. Bodies are transmitted and displayed verbatim (no trimming). A code point is whitespace iff it has the Unicode White_Space property, i.e. it is exactly one of: U+0009\u2013U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000\u2013U+200A, U+2028, U+2029, U+202F, U+205F, U+3000. Every other code point (including U+001C\u2013U+001F, U+180E, U+200B and U+FEFF) is non-whitespace.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-9": {
+          "level": "MUST",
+          "text": "A message ID is a lowercase RFC 4122 version-4 UUID string generated by the **sending client** when the message is created. The same ID is used for every retry of that message.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-10": {
+          "level": "MUST",
+          "text": "`seq` is a positive integer assigned by the server when it first accepts a message. Sequence numbers are global, strictly increasing, start at 1, and are never reassigned.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-11": {
+          "level": "MUST",
+          "text": "The first frame a client sends on a new connection is `hello`. The server answers any other frame received before a successful `hello` with `error` code `not_identified`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-12": {
+          "level": "MUST",
+          "text": "If `hello.user` is invalid (P-7) the server sends `error` code `invalid_name` and closes the connection. If `hello.protocol` is not `1` it sends `error` code `unsupported_protocol` and closes.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-13": {
+          "level": "MUST",
+          "text": "On a valid `hello` the server sends `welcome` and then, in ascending `seq` order, a `deliver` frame for every message pending for that user.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-14": {
+          "level": "MUST",
+          "text": "A user has at most one live connection. A new valid `hello` for a user who is already connected makes the server send `error` code `replaced` on the **old** connection and close it.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-15": {
+          "level": "MUST",
+          "text": "The sender's identity is the `hello.user` of the connection. The server ignores any `from` field a client puts in `send`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-16": {
+          "level": "MUST",
+          "text": "On `send` the server validates `to` (P-7) and `body` (P-8). Invalid \u2192 `error` with code `invalid_recipient` or `invalid_body` and the message's `id`; the message is not stored.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-17": {
+          "level": "MUST",
+          "text": "A message where `to` equals the sender is rejected with `invalid_recipient`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-18": {
+          "level": "MUST",
+          "text": "Messages to a name that has never connected are accepted and held until that user connects. There is no user registry.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-19": {
+          "level": "MUST",
+          "text": "For a new `(sender, id)` pair the server assigns the next `seq`, stores the message as pending for the recipient, then sends `ack {id, seq}` to the sender.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-20": {
+          "level": "MUST",
+          "text": "For an `(sender, id)` pair it has already accepted, the server sends `ack` with the **original** `seq` and does not store or deliver the message again (idempotent retry).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-21": {
+          "level": "MUST",
+          "text": "If the recipient is connected when a message is accepted, the server sends it a `deliver` frame immediately after the sender's `ack`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-22": {
+          "level": "MUST",
+          "text": "The server processes frames from one connection in the order received, so messages sent in order on one connection receive increasing `seq`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-23": {
+          "level": "MUST",
+          "text": "A message stays pending for its recipient until the recipient sends `delivered` with its `id`. Pending messages that were sent on a connection that closed before `delivered` arrived are sent again (P-13) on the recipient's next connection.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-24": {
+          "level": "MUST",
+          "text": "`delivered` for an unknown or already-delivered `id` is ignored silently.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-25": {
+          "level": "MUST",
+          "text": "The server never delivers a message to its sender.",
+          "file": "spec/core/protocol.md"
+        },
+        "PY-1": {
+          "level": "MUST",
+          "text": "Python 3.11+ standard library only. No third-party packages, no `pip install`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-2": {
+          "level": "MUST",
+          "text": "Entry point is `clients/python/main.py`, launched as `python3 clients/python/main.py [options]` from the repository root. It must also work when launched from any other working directory.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-3": {
+          "level": "MUST",
+          "text": "Networking and timers use `asyncio` (`asyncio.open_connection`). Stdin is read on a background thread that hands lines to the event loop (portable; avoids platform-specific pipe readers). Read bytes from `sys.stdin.buffer` and split on `b\"\\n\"` yourself, decoding each line with `line.decode(\"utf-8\", errors=\"replace\")` (not `\"utf-8-sig\"`, so a leading U+FEFF is kept): text-mode `sys.stdin` uses universal newlines and would split on a lone `\\r` (I-3).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-4": {
+          "level": "MUST",
+          "text": "Durable state is a SQLite database `state.sqlite3` in the data directory, via the `sqlite3` module. Each state change is one committed transaction (C-2).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-5": {
+          "level": "MUST",
+          "text": "Default data directory: `~/.message-friend/python`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-6": {
+          "level": "MUST",
+          "text": "Message IDs come from `uuid.uuid4()` formatted with `str()` (already lowercase).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-7": {
+          "level": "MUST",
+          "text": "Body length (P-8) is `len(body)` on a `str` (Python strings count code points). The whitespace test (P-8) uses an explicit set of the code points listed in P-8, **not** `str.isspace()` or `str.strip()` (which treat U+001C\u2013U+001F as whitespace).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-8": {
+          "level": "MUST",
+          "text": "Output uses `print(..., flush=True)` or an equivalent that flushes per line; JSON is serialised with `json.dumps(obj, ensure_ascii=False)`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-9": {
+          "level": "SHOULD",
+          "text": "Code is split into small modules by concern (protocol/framing, storage, client state machine, CLI), each with type hints.",
+          "file": "spec/platforms/python.md"
+        },
+        "TS-1": {
+          "level": "MUST",
+          "text": "TypeScript compiled by the repository's pinned compiler (`tools/node_modules/.bin/tsc`, TypeScript 5.6) and run on Node.js 20+. Runtime code uses Node built-in modules only (`node:net`, `node:fs`, `node:readline`, `node:crypto`, \u2026). No npm runtime dependencies; do not run `npm`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-2": {
+          "level": "MUST",
+          "text": "Layout: sources in `clients/typescript/src/`, entry `src/main.ts`; compiled output in `clients/typescript/dist/` (entry `dist/main.js`). Launched as `node clients/typescript/dist/main.js [options]`; it must work from any working directory.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-3": {
+          "level": "MUST",
+          "text": "`clients/typescript/package.json` is exactly `{\"type\": \"module\", \"private\": true}` and `clients/typescript/tsconfig.json` uses: `\"target\": \"ES2022\"`, `\"module\": \"NodeNext\"`, `\"moduleResolution\": \"NodeNext\"`, `\"strict\": true`, `\"rootDir\": \"src\"`, `\"outDir\": \"dist\"`, `\"typeRoots\": [\"../../tools/node_modules/@types\"]`, `\"types\": [\"node\"]`, `\"include\": [\"src\"]`. Relative imports use `.js` extensions (NodeNext ESM).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-4": {
+          "level": "MUST",
+          "text": "The build command `tools/node_modules/.bin/tsc -p clients/typescript` succeeds with zero errors.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-5": {
+          "level": "MUST",
+          "text": "Networking uses `net.createConnection`; incoming bytes are buffered and split on `\\n` (a frame may arrive split across or combined within `data` chunks). Stdin is read from `process.stdin` `data` events and split on `\\n` yourself (do **not** use `readline`: it also splits on a lone `\\r`, violating I-3). Stdin is buffered as raw bytes and split on 0x0A **before** decoding (a chunk may end mid-character); each line is decoded with `new TextDecoder(\"utf-8\", { fatal: false, ignoreBOM: true })` (I-3).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-6": {
+          "level": "MUST",
+          "text": "Durable state is a JSON file `state.json` in the data directory. Every change rewrites it atomically with synchronous fs calls: write `state.json.tmp`, `fsync`, then `rename` over `state.json` (C-1, C-2).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-7": {
+          "level": "MUST",
+          "text": "Default data directory: `~/.message-friend/typescript`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-8": {
+          "level": "MUST",
+          "text": "Message IDs come from `crypto.randomUUID()`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-9": {
+          "level": "MUST",
+          "text": "Body length (P-8) is measured in code points, i.e. `[...body].length`, **not** `body.length` (which counts UTF-16 units and would disagree with other clients for emoji). The whitespace test (P-8) uses an explicit set of the code points listed in P-8, **not** `/\\S/`, `\\s` or `String.prototype.trim()` (which treat U+FEFF as whitespace and U+0085 as not).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-10": {
+          "level": "MUST",
+          "text": "Stdin commands are processed strictly one at a time in order (I-7) even though stdin data arrives asynchronously.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-11": {
+          "level": "SHOULD",
+          "text": "Code is split into small modules by concern (protocol/framing, storage, client state machine, CLI).",
+          "file": "spec/platforms/typescript.md"
+        }
+      }
+    },
+    {
+      "hash": "3e425447f2a7442188c1b49bb2fb3d9cfd1d39e53b94194a772b918c39e297a6",
+      "rules": {
+        "C-1": {
+          "level": "MUST",
+          "text": "`user`, `outbox` and `inbox` are stored durably in the data directory and survive process exit, including a kill without warning.",
+          "file": "spec/core/client.md"
+        },
+        "C-2": {
+          "level": "MUST",
+          "text": "A state change is durably written **before** the event reporting it is emitted, and before any frame that depends on it is sent (e.g. an inbox write happens before `delivered`).",
+          "file": "spec/core/client.md"
+        },
+        "C-3": {
+          "level": "MUST",
+          "text": "On start the client loads its state, then emits `started` with the stored user (or `null`). It emits no other event before `started`.",
+          "file": "spec/core/client.md"
+        },
+        "C-4": {
+          "level": "MUST",
+          "text": "On start with a stored user, the client begins connecting immediately (C-7). It never asks for the name again: login happens once per data directory.",
+          "file": "spec/core/client.md"
+        },
+        "C-5": {
+          "level": "MUST",
+          "text": "`login <name>` when no user is stored: validate the name (P-7, else error `invalid_name`), persist it, emit `logged_in`, then begin connecting.",
+          "file": "spec/core/client.md"
+        },
+        "C-6": {
+          "level": "MUST",
+          "text": "`login` when a user is already stored emits error `already_logged_in` and changes nothing.",
+          "file": "spec/core/client.md"
+        },
+        "C-7": {
+          "level": "MUST",
+          "text": "While a user is stored and the client is not ONLINE or CONNECTING (and not STOPPED), it attempts a TCP connection. If the attempt fails, or an established connection closes for any reason, it waits 500 ms and tries again, indefinitely.",
+          "file": "spec/core/client.md"
+        },
+        "C-8": {
+          "level": "MUST",
+          "text": "After the TCP connection opens the client sends `hello {user, protocol: 1}` and becomes ONLINE only when it receives `welcome`.",
+          "file": "spec/core/client.md"
+        },
+        "C-27": {
+          "level": "MUST",
+          "text": "If `welcome` has not been received 5 seconds after the TCP connection opened, the client closes the connection and retries per C-7 (wait 500 ms, then a new attempt). This emits no event (C-9: leaving CONNECTING is silent).",
+          "file": "spec/core/client.md"
+        },
+        "C-9": {
+          "level": "MUST",
+          "text": "The client emits `status {online: true}` on entering ONLINE and `status {online: false}` on leaving ONLINE. It emits nothing for failed attempts or for leaving CONNECTING. The client starts OFFLINE without emitting a status event.",
+          "file": "spec/core/client.md"
+        },
+        "C-10": {
+          "level": "MUST",
+          "text": "On error `replaced` the client emits `error {code: \"replaced\", detail}` (detail per C-26), closes the connection (emitting `status {online:false}` if it was ONLINE), enters STOPPED and makes no further connection attempts until the process restarts.",
+          "file": "spec/core/client.md"
+        },
+        "C-11": {
+          "level": "MUST",
+          "text": "`send <to> <body>` validates in this order, emitting the first failing error and queuing nothing: no stored user \u2192 `not_logged_in`; `to` invalid (P-7) or equal to own name \u2192 `invalid_recipient`; body invalid (P-8) \u2192 `invalid_body`.",
+          "file": "spec/core/client.md"
+        },
+        "C-12": {
+          "level": "MUST",
+          "text": "A valid send creates a new message ID (P-9), appends `{id, to, body}` to the outbox, persists it, then emits `queued`. This is the same whether ONLINE or not.",
+          "file": "spec/core/client.md"
+        },
+        "C-13": {
+          "level": "MUST",
+          "text": "On entering ONLINE the client transmits a `send` frame for every outbox entry, in outbox order, immediately after receiving `welcome`. While ONLINE, a newly queued entry is transmitted immediately.",
+          "file": "spec/core/client.md"
+        },
+        "C-14": {
+          "level": "MUST",
+          "text": "An entry is removed from the outbox only when an `ack` with its `id` arrives: remove, persist, then emit `sent {id, seq}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-15": {
+          "level": "MUST",
+          "text": "Entries not acked when a connection closes stay in the outbox, keep their `id`, and are retransmitted by C-13 on the next connection. The client never generates a new ID for a retry.",
+          "file": "spec/core/client.md"
+        },
+        "C-16": {
+          "level": "MUST",
+          "text": "An `ack` for an `id` not in the outbox is ignored.",
+          "file": "spec/core/client.md"
+        },
+        "C-17": {
+          "level": "MUST",
+          "text": "An `error` frame whose `id` matches an outbox entry removes that entry (persisted) and emits `failed {id, code}`. The entry is not retried.",
+          "file": "spec/core/client.md"
+        },
+        "C-18": {
+          "level": "MUST",
+          "text": "On `deliver`: if no inbox entry has that `id`, append the message to the inbox, persist, and emit `message`. Whether new or duplicate, the client then sends `delivered {id}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-19": {
+          "level": "MUST",
+          "text": "A duplicate `deliver` (same `id`) never produces a second `message` event or a second inbox entry.",
+          "file": "spec/core/client.md"
+        },
+        "C-20": {
+          "level": "MUST",
+          "text": "`error` frames from the server that match no outbox entry and are not `replaced` are reported as `error {code: <server code>, detail}`.",
+          "file": "spec/core/client.md"
+        },
+        "C-21": {
+          "level": "MUST",
+          "text": "Frames that are not valid JSON objects with a `type` are ignored.",
+          "file": "spec/core/client.md"
+        },
+        "C-24": {
+          "level": "MUST",
+          "text": "While CONNECTING (after `hello`, before `welcome`) the client handles only `welcome` and `error` frames; any other frame is ignored (no event, no `delivered`).",
+          "file": "spec/core/client.md"
+        },
+        "C-25": {
+          "level": "MUST",
+          "text": "A `deliver` frame is processed only if `id`, `from`, `to` and `body` are strings and `seq` is an integer; otherwise it is ignored entirely (no event, no `delivered`). An `ack` is processed only if `id` is a string and `seq` an integer.",
+          "file": "spec/core/client.md"
+        },
+        "C-26": {
+          "level": "MUST",
+          "text": "An `error` frame is processed only if `code` is a string; otherwise it is ignored entirely (no event, no state change). When processed, `detail` is taken as `\"\"` if it is missing or not a string, and `id` is treated as absent unless it is a string (so it matches no outbox entry, C-17). This applies to every `error` path: `replaced` (C-10), failures (C-17) and pass-through errors (C-20).",
+          "file": "spec/core/client.md"
+        },
+        "C-22": {
+          "level": "MUST",
+          "text": "`queued` events appear in command order; `sent` events for messages queued by one client appear in outbox order.",
+          "file": "spec/core/client.md"
+        },
+        "C-23": {
+          "level": "MUST",
+          "text": "`message` events appear in the order the server delivered them.",
+          "file": "spec/core/client.md"
+        },
+        "I-1": {
+          "level": "MUST",
+          "text": "The client is launched with the command given in its platform spec, plus these options in any order:",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-2": {
+          "level": "MUST",
+          "text": "An unknown option, a missing option value, a malformed `--server`, or any positional (non-option) word (e.g. `main.py foo`) prints a usage message to stderr and exits with code 2. Options are separate words (`--server 127.0.0.1:7070`); the `--opt=value` form is an unknown option. An option given more than once is not an error: the last occurrence wins (`--server a:1 --server b:2` uses `b:2`).",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-11": {
+          "level": "MUST",
+          "text": "`--server` is well-formed iff it is `HOST:PORT` where HOST is non-empty and contains no `:` (IPv6 literals are not supported), and PORT matches `^[0-9]+$` (ASCII digits only; no sign, no whitespace) with numeric value 1\u201365535. Leading zeros are allowed (`host:07070` is port 7070); `host:+80` and `host:0` are malformed.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-3": {
+          "level": "MUST",
+          "text": "Commands are read from stdin, one per line. Lines end **only** at `\\n`; one `\\r` immediately before `\\n` is stripped; any other `\\r` is part of the line (and so of a message body). Note that common line readers also split on a lone `\\r` and must not be used as-is. Each line's bytes are decoded as UTF-8 with replacement: every ill-formed sequence becomes U+FFFD and the text is processed normally; invalid UTF-8 never crashes the client or rejects the line by itself. A leading U+FEFF is kept as part of the line. End of stdin behaves like `quit`.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-4": {
+          "level": "MUST",
+          "text": "`quit` closes the connection and exits with code 0. Durable state is already persisted (C-2), so no extra flush is required.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-5": {
+          "level": "MUST",
+          "text": "Every output line is written to stdout and flushed immediately. Diagnostics go to stderr only.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-6": {
+          "level": "MUST",
+          "text": "A line that is empty (zero length after the I-3 `\\r` stripping) is ignored. Every other line is parsed literally, with no trimming: a line of only spaces or with leading spaces (`   `, ` login alice`) has an empty or unknown command word. Command words are case-sensitive (`LOGIN alice`). An unknown command word emits error `unknown_command`.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-12": {
+          "level": "MUST",
+          "text": "Argument parsing happens before any state check (login state, validation), so a malformed command always emits `bad_arguments`, even when not logged in:",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-13": {
+          "level": "MAY",
+          "text": "The `detail` of locally generated errors is free-form help text (may be empty). Observers must not depend on it.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-7": {
+          "level": "MUST",
+          "text": "Commands are processed in the order read. A command's own events are emitted before the next command is processed. `inbox`/`outbox` reflect all previously processed commands and all frames already handled.",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-8": {
+          "level": "MUST",
+          "text": "In `--json` mode each stdout line is exactly one JSON object with a string field `event`, using exactly these shapes (field order is not significant; extensions may add fields):",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-9": {
+          "level": "MUST",
+          "text": "Local error codes: `not_logged_in`, `already_logged_in`, `invalid_name`, `invalid_recipient`, `invalid_body`, `unknown_command`, `bad_arguments`. Server error codes are passed through (C-20).",
+          "file": "spec/core/control-interface.md"
+        },
+        "I-10": {
+          "level": "MUST",
+          "text": "Without `--json`, each event is printed as one line using these templates (`{x}` is substituted verbatim):",
+          "file": "spec/core/control-interface.md"
+        },
+        "P-1": {
+          "level": "MUST",
+          "text": "Transport is TCP. Default server address is `127.0.0.1:7070`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-2": {
+          "level": "MUST",
+          "text": "Each frame is one JSON object encoded as UTF-8, followed by a single `\\n` (0x0A). Frames contain no raw newlines.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-3": {
+          "level": "MUST",
+          "text": "Every frame has a string field `type`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-4": {
+          "level": "MUST",
+          "text": "Receivers ignore object fields they do not recognise (forward compatibility for extensions).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-5": {
+          "level": "MUST",
+          "text": "A client that receives a frame with an unrecognised `type` ignores it. The server answers an unrecognised `type` with `error` code `unknown_type` and keeps the connection open.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-6": {
+          "level": "MUST",
+          "text": "A frame that is not valid JSON or lacks `type` is answered by the server with `error` code `bad_frame`; the connection stays open.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-7": {
+          "level": "MUST",
+          "text": "A user name matches `^[A-Za-z0-9_-]{1,32}$`. Names are case-sensitive (`Alice` \u2260 `alice`).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-8": {
+          "level": "MUST",
+          "text": "A message body is a string of 1\u20134000 Unicode code points (not bytes, not UTF-16 units) and contains at least one non-whitespace character. Bodies are transmitted and displayed verbatim (no trimming). A code point is whitespace iff it has the Unicode White_Space property, i.e. it is exactly one of: U+0009\u2013U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000\u2013U+200A, U+2028, U+2029, U+202F, U+205F, U+3000. Every other code point (including U+001C\u2013U+001F, U+180E, U+200B and U+FEFF) is non-whitespace.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-9": {
+          "level": "MUST",
+          "text": "A message ID is a lowercase RFC 4122 version-4 UUID string generated by the **sending client** when the message is created. The same ID is used for every retry of that message.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-10": {
+          "level": "MUST",
+          "text": "`seq` is a positive integer assigned by the server when it first accepts a message. Sequence numbers are global, strictly increasing, start at 1, and are never reassigned.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-11": {
+          "level": "MUST",
+          "text": "The first frame a client sends on a new connection is `hello`. The server answers any other frame received before a successful `hello` with `error` code `not_identified`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-12": {
+          "level": "MUST",
+          "text": "If `hello.user` is invalid (P-7) the server sends `error` code `invalid_name` and closes the connection. If `hello.protocol` is not `1` it sends `error` code `unsupported_protocol` and closes.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-13": {
+          "level": "MUST",
+          "text": "On a valid `hello` the server sends `welcome` and then, in ascending `seq` order, a `deliver` frame for every message pending for that user.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-14": {
+          "level": "MUST",
+          "text": "A user has at most one live connection. A new valid `hello` for a user who is already connected makes the server send `error` code `replaced` on the **old** connection and close it.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-15": {
+          "level": "MUST",
+          "text": "The sender's identity is the `hello.user` of the connection. The server ignores any `from` field a client puts in `send`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-16": {
+          "level": "MUST",
+          "text": "On `send` the server validates `to` (P-7) and `body` (P-8). Invalid \u2192 `error` with code `invalid_recipient` or `invalid_body` and the message's `id`; the message is not stored.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-17": {
+          "level": "MUST",
+          "text": "A message where `to` equals the sender is rejected with `invalid_recipient`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-18": {
+          "level": "MUST",
+          "text": "Messages to a name that has never connected are accepted and held until that user connects. There is no user registry.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-19": {
+          "level": "MUST",
+          "text": "For a new `(sender, id)` pair the server assigns the next `seq`, stores the message as pending for the recipient, then sends `ack {id, seq}` to the sender.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-20": {
+          "level": "MUST",
+          "text": "For an `(sender, id)` pair it has already accepted, the server sends `ack` with the **original** `seq` and does not store or deliver the message again (idempotent retry).",
+          "file": "spec/core/protocol.md"
+        },
+        "P-21": {
+          "level": "MUST",
+          "text": "If the recipient is connected when a message is accepted, the server sends it a `deliver` frame immediately after the sender's `ack`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-22": {
+          "level": "MUST",
+          "text": "The server processes frames from one connection in the order received, so messages sent in order on one connection receive increasing `seq`.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-23": {
+          "level": "MUST",
+          "text": "A message stays pending for its recipient until the recipient sends `delivered` with its `id`. Pending messages that were sent on a connection that closed before `delivered` arrived are sent again (P-13) on the recipient's next connection.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-24": {
+          "level": "MUST",
+          "text": "`delivered` for an unknown or already-delivered `id` is ignored silently.",
+          "file": "spec/core/protocol.md"
+        },
+        "P-25": {
+          "level": "MUST",
+          "text": "The server never delivers a message to its sender.",
+          "file": "spec/core/protocol.md"
+        },
+        "X001-1": {
+          "level": "MUST",
+          "text": "A group name is `#` followed by a name matching P-7 (e.g. `#house`). Group names are case-sensitive.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-2": {
+          "level": "MUST",
+          "text": "Each client keeps a durable list of groups (C-1, C-2): a group name and its members, an ordered list of 1\u201320 distinct user names (P-7) that never includes the logged-in user. The list is in creation order; replacing a group's members keeps its place.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-3": {
+          "level": "MUST",
+          "text": "New command `group <#name> <names>`: the text after `group ` is split at its first space into `<#name>` and `<names>`; no further space \u2192 `bad_arguments`. `<names>` is a comma-separated list (`group #house bob,carol`). Validation, first failure wins: no stored user \u2192 `not_logged_in`; `<#name>` invalid (X001-1) \u2192 `invalid_group`; `<names>` empty, more than 20 names, any name invalid (P-7) or equal to the user's own name, or a name repeated \u2192 `invalid_members`. On success the client creates the group (or replaces its members), persists it, then emits `group {group, members}`.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-4": {
+          "level": "MUST",
+          "text": "New command `groups` emits `groups {groups}`: an array of `{group, members}` in list order (X001-2). Any text after `groups` is ignored.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-5": {
+          "level": "MUST",
+          "text": "Amends C-11 and C-12: in `send <to> <body>`, a `<to>` starting with `#` is a group send. Validation, first failure wins: no stored user \u2192 `not_logged_in`; no group with that name \u2192 `invalid_recipient`; body invalid (P-8) \u2192 `invalid_body`. A valid group send appends one outbox entry per member, in member order, each with its own new message ID (P-9), `to` = that member, `group` = the group name, and `members` = the group's members followed by the sender. All entries are persisted together, then one `queued` event per entry is emitted, in member order.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-6": {
+          "level": "MUST",
+          "text": "Events gain fields for group messages, and only for them: `queued` adds `group`; `message` adds `group` and `members`; `inbox` and `outbox` entries add `group` and `members`. Messages that are not group messages keep exactly the core shapes (I-8).",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-7": {
+          "level": "MUST",
+          "text": "Human mode (I-10) templates:",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-8": {
+          "level": "MUST",
+          "text": "A `send` frame for a group outbox entry also carries `group` (string) and `members` (array of strings), exactly as stored in the entry.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-9": {
+          "level": "MUST",
+          "text": "Amends P-16 and P-19: if a `send` frame has a `group` field, the server checks that `group` is a valid group name (X001-1) and that `members` is an array of 2\u201321 distinct valid names (P-7) containing both the sender and `to`; otherwise it answers `error` code `invalid_group` with the message's `id` and does not store it. A valid group message keeps `group` and `members`, and its `deliver` frames carry both unchanged. Frames without `group` are handled exactly as in the core.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-10": {
+          "level": "MUST",
+          "text": "Amends C-25: a `deliver` frame with a `group` field is processed only if `group` is a valid group name (X001-1) and `members` is an array of strings that contains both `from` and the logged-in user; otherwise it is ignored entirely (no event, no `delivered`).",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "X001-11": {
+          "level": "MUST",
+          "text": "On a new (not duplicate, C-19) group message, the client first stores the group as `members` minus the logged-in user, in the order given, creating the group or replacing its members (X001-2); if that changed the stored list, it emits `group {group, members}`. It then stores the message (with `group` and `members`) and emits `message` as in C-18. This lets every member reply to the whole group with `send #name \u2026`.",
+          "file": "spec/extensions/001-groups.md"
+        },
+        "PY-1": {
+          "level": "MUST",
+          "text": "Python 3.11+ standard library only. No third-party packages, no `pip install`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-2": {
+          "level": "MUST",
+          "text": "Entry point is `clients/python/main.py`, launched as `python3 clients/python/main.py [options]` from the repository root. It must also work when launched from any other working directory.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-3": {
+          "level": "MUST",
+          "text": "Networking and timers use `asyncio` (`asyncio.open_connection`). Stdin is read on a background thread that hands lines to the event loop (portable; avoids platform-specific pipe readers). Read bytes from `sys.stdin.buffer` and split on `b\"\\n\"` yourself, decoding each line with `line.decode(\"utf-8\", errors=\"replace\")` (not `\"utf-8-sig\"`, so a leading U+FEFF is kept): text-mode `sys.stdin` uses universal newlines and would split on a lone `\\r` (I-3).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-4": {
+          "level": "MUST",
+          "text": "Durable state is a SQLite database `state.sqlite3` in the data directory, via the `sqlite3` module. Each state change is one committed transaction (C-2).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-5": {
+          "level": "MUST",
+          "text": "Default data directory: `~/.message-friend/python`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-6": {
+          "level": "MUST",
+          "text": "Message IDs come from `uuid.uuid4()` formatted with `str()` (already lowercase).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-7": {
+          "level": "MUST",
+          "text": "Body length (P-8) is `len(body)` on a `str` (Python strings count code points). The whitespace test (P-8) uses an explicit set of the code points listed in P-8, **not** `str.isspace()` or `str.strip()` (which treat U+001C\u2013U+001F as whitespace).",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-8": {
+          "level": "MUST",
+          "text": "Output uses `print(..., flush=True)` or an equivalent that flushes per line; JSON is serialised with `json.dumps(obj, ensure_ascii=False)`.",
+          "file": "spec/platforms/python.md"
+        },
+        "PY-9": {
+          "level": "SHOULD",
+          "text": "Code is split into small modules by concern (protocol/framing, storage, client state machine, CLI), each with type hints.",
+          "file": "spec/platforms/python.md"
+        },
+        "TS-1": {
+          "level": "MUST",
+          "text": "TypeScript compiled by the repository's pinned compiler (`tools/node_modules/.bin/tsc`, TypeScript 5.6) and run on Node.js 20+. Runtime code uses Node built-in modules only (`node:net`, `node:fs`, `node:readline`, `node:crypto`, \u2026). No npm runtime dependencies; do not run `npm`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-2": {
+          "level": "MUST",
+          "text": "Layout: sources in `clients/typescript/src/`, entry `src/main.ts`; compiled output in `clients/typescript/dist/` (entry `dist/main.js`). Launched as `node clients/typescript/dist/main.js [options]`; it must work from any working directory.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-3": {
+          "level": "MUST",
+          "text": "`clients/typescript/package.json` is exactly `{\"type\": \"module\", \"private\": true}` and `clients/typescript/tsconfig.json` uses: `\"target\": \"ES2022\"`, `\"module\": \"NodeNext\"`, `\"moduleResolution\": \"NodeNext\"`, `\"strict\": true`, `\"rootDir\": \"src\"`, `\"outDir\": \"dist\"`, `\"typeRoots\": [\"../../tools/node_modules/@types\"]`, `\"types\": [\"node\"]`, `\"include\": [\"src\"]`. Relative imports use `.js` extensions (NodeNext ESM).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-4": {
+          "level": "MUST",
+          "text": "The build command `tools/node_modules/.bin/tsc -p clients/typescript` succeeds with zero errors.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-5": {
+          "level": "MUST",
+          "text": "Networking uses `net.createConnection`; incoming bytes are buffered and split on `\\n` (a frame may arrive split across or combined within `data` chunks). Stdin is read from `process.stdin` `data` events and split on `\\n` yourself (do **not** use `readline`: it also splits on a lone `\\r`, violating I-3). Stdin is buffered as raw bytes and split on 0x0A **before** decoding (a chunk may end mid-character); each line is decoded with `new TextDecoder(\"utf-8\", { fatal: false, ignoreBOM: true })` (I-3).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-6": {
+          "level": "MUST",
+          "text": "Durable state is a JSON file `state.json` in the data directory. Every change rewrites it atomically with synchronous fs calls: write `state.json.tmp`, `fsync`, then `rename` over `state.json` (C-1, C-2).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-7": {
+          "level": "MUST",
+          "text": "Default data directory: `~/.message-friend/typescript`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-8": {
+          "level": "MUST",
+          "text": "Message IDs come from `crypto.randomUUID()`.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-9": {
+          "level": "MUST",
+          "text": "Body length (P-8) is measured in code points, i.e. `[...body].length`, **not** `body.length` (which counts UTF-16 units and would disagree with other clients for emoji). The whitespace test (P-8) uses an explicit set of the code points listed in P-8, **not** `/\\S/`, `\\s` or `String.prototype.trim()` (which treat U+FEFF as whitespace and U+0085 as not).",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-10": {
+          "level": "MUST",
+          "text": "Stdin commands are processed strictly one at a time in order (I-7) even though stdin data arrives asynchronously.",
+          "file": "spec/platforms/typescript.md"
+        },
+        "TS-11": {
+          "level": "SHOULD",
+          "text": "Code is split into small modules by concern (protocol/framing, storage, client state machine, CLI).",
+          "file": "spec/platforms/typescript.md"
+        }
+      }
+    }
+  ]
 }

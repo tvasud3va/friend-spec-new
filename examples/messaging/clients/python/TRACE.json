@@ -73,6 +73,17 @@
     "PY-6": ["protocol.py"],
     "PY-7": ["protocol.py"],
     "PY-8": ["output.py"],
-    "PY-9": ["main.py", "cli.py", "client.py", "output.py", "protocol.py", "storage.py"]
+    "PY-9": ["main.py", "cli.py", "client.py", "output.py", "protocol.py", "storage.py"],
+    "X001-1": ["protocol.py", "client.py"],
+    "X001-2": ["storage.py", "client.py"],
+    "X001-3": ["client.py", "output.py"],
+    "X001-4": ["client.py", "output.py"],
+    "X001-5": ["client.py", "storage.py"],
+    "X001-6": ["output.py"],
+    "X001-7": ["output.py"],
+    "X001-8": ["client.py"],
+    "X001-9": "n/a: server-side behaviour (client passes `invalid_group` errors through via C-17/C-20)",
+    "X001-10": ["client.py"],
+    "X001-11": ["client.py", "storage.py"]
   }
 }

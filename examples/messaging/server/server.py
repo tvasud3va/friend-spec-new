@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""message-friend server: single process, in-memory, implements spec/core/protocol.md.
+"""message-friend server: single process, in-memory, implements spec/core/protocol.md and spec/extensions/001-groups.md.
 
 Hand-written (not under generator discipline). Rule IDs in comments point at the spec.
 Run: python3 server/server.py [--host 127.0.0.1] [--port 7070]   (--port 0 picks a free port)
@@ -19,8 +19,20 @@ UUID4_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-
 PROTOCOL = 1
 
 
+WHITESPACE = {*map(chr, range(0x09, 0x0E)), " ", "\x85", "\xa0", "\u1680", *map(chr, range(0x2000, 0x200B)),
+              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000"}  # P-8: Unicode White_Space, not str.isspace()
+GROUP_RE = re.compile(r"^#[A-Za-z0-9_-]{1,32}$")  # X001-1
+
+
 def valid_body(body: object) -> bool:  # P-8
-    return isinstance(body, str) and 1 <= len(body) <= 4000 and not body.isspace()
+    return isinstance(body, str) and 1 <= len(body) <= 4000 and any(c not in WHITESPACE for c in body)
+
+
+def valid_group(frame: dict, sender: str, to: str) -> bool:  # X001-9
+    members = frame.get("members")
+    return (isinstance(frame.get("group"), str) and GROUP_RE.match(frame["group"]) is not None
+            and isinstance(members, list) and 2 <= len(members) <= 21 and len(set(map(str, members))) == len(members)
+            and all(isinstance(m, str) and NAME_RE.match(m) for m in members) and sender in members and to in members)
 
 
 @dataclass
@@ -30,10 +42,11 @@ class Message:
     to: str
     body: str
     seq: int
+    group: dict | None = None  # X001-9: {"group", "members"}, passed through unchanged
 
     def frame(self) -> dict:
         return {"type": "deliver", "id": self.id, "from": self.sender, "to": self.to,
-                "body": self.body, "seq": self.seq}
+                "body": self.body, "seq": self.seq, **(self.group or {})}
 
 
 @dataclass
@@ -115,8 +128,11 @@ class Server:
             return conn.send(err("invalid_recipient", str(to), mid))
         if not valid_body(body):
             return conn.send(err("invalid_body", "1-4000 code points, not all whitespace", mid))
+        if "group" in frame and not valid_group(frame, sender, to):
+            return conn.send(err("invalid_group", "group needs a #name and 2-21 distinct members incl. sender and to", mid))
         self.seq += 1  # P-10
-        msg = Message(mid, sender, to, body, self.seq)
+        group = {"group": frame["group"], "members": frame["members"]} if "group" in frame else None
+        msg = Message(mid, sender, to, body, self.seq, group)
         self.accepted[key] = msg.seq
         self.pending.setdefault(to, []).append(msg)  # P-18, P-19
         conn.send({"type": "ack", "id": mid, "seq": msg.seq})
