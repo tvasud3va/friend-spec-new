@@ -10,6 +10,7 @@ the plan, so nothing here names a project-specific directory.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from config import KIT, Config, expand, rel_or_abs
 
@@ -68,6 +69,23 @@ class Role:
         if "Bash" in self.tools:
             allowed += [f"Bash({e}*)" for e in self.execs] + ["Bash(ls *)", "Bash(mkdir -p *)"]
         return allowed
+
+    def deny_paths(self, root: Path) -> list[str]:
+        """Everything in the repository outside this role's read/write scope."""
+        scope = [(root / p).resolve() for p in self.read + self.write]
+        out: list[str] = []
+
+        def walk(d: Path) -> None:
+            for child in sorted(d.iterdir()):
+                c = child.resolve()
+                if any(c == s or s in c.parents for s in scope):
+                    continue                       # inside scope
+                if any(c in s.parents for s in scope):
+                    walk(child)                    # ancestor of something in scope
+                elif child.name not in (".", ".."):
+                    out.append(str(child.relative_to(root)))
+        walk(root)
+        return out
 
 
 def planner(cfg: Config) -> Role:

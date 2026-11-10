@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -18,6 +20,8 @@ from typing import Callable
 
 from config import Config
 from roles import Role
+
+HOOK = Path(__file__).resolve().parent / "policy_hook.py"
 
 
 @dataclass
@@ -38,10 +42,18 @@ class AgentResult:
 
 
 def build_command(cfg: Config, role: Role, run_dir: Path, session_id: str, resume: bool, system_prompt: str) -> list[str]:
-    a = cfg["agent"]
+    a, root = cfg["agent"], cfg.root
+    hook = [sys.executable, str(HOOK), "--root", str(root), "--label", role.label, "--events", str(run_dir / "events.jsonl")]
+    for flag, values in (("--write", role.write), ("--read", role.read), ("--exec", role.execs), ("--deny", role.deny_paths(root))):
+        for v in values:
+            hook += [flag, v]
+    settings = {"hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": shlex.join(hook)}]}]}}
+    settings_path = run_dir / f"settings-{role.label.replace(':', '-')}.json"
+    settings_path.write_text(json.dumps(settings, indent=2))
     cmd = [a["command"], "-p",
            "--output-format", "stream-json", "--verbose",
            "--setting-sources", "",                 # ignore user/project settings: a reproducible envelope
+           "--settings", str(settings_path),        # ...except our policy hook
            "--strict-mcp-config",                   # no MCP servers
            "--disable-slash-commands",
            "--tools", ",".join(role.tools),
