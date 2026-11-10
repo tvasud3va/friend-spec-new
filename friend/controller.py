@@ -3,7 +3,7 @@
   plan ─► [approval] ─► tests ─► [approval] ─► build:<target> (one per target, sequential)
 
   plan    planner proposes targets → deterministic validation (retries) → plan.json
-  tests   tester writes the suite → gates: it imports and is not empty (fix rounds)
+  tests   tester writes the suite → gates: imports, rule coverage, untestable limit, vacuity (fix rounds)
   build   prepare → implement → checking (build, suite, static gates) → passed|failed|blocked
 
 Every transition is persisted before the next action, so `generate` can resume after any crash.
@@ -175,7 +175,7 @@ class Controller:
         rep = m.get("report", {})
         unt = "\n".join(f"    {u['rule']}: {u['reason'][:160]}" for u in m.get("untestable", []))
         summary = (f"── Tests ({self.cfg.tests_dir}/) ──\n  {rep.get('tests', '?')} tests · {len(rep.get('covered', []))}/{rep.get('must_rules', '?')} "
-                   f"MUST/SHOULD rules covered · {len(m.get('untestable', []))} untestable"
+                   f"MUST/SHOULD rules covered · {len(m.get('untestable', []))} untestable · {len(rep.get('vacuous', []))} vacuous"
                    + (f"\n  untestable:\n{unt}" if unt else ""))
         tests, _ = checks.list_suite(self.cfg)
         detail = "\n".join(f"  {t['name']:45} {', '.join(t['rules'])}" + ("  [interop]" if t["interop"] else "") for t in tests or [])
@@ -242,7 +242,7 @@ class Controller:
         svc = "\n".join(f"- `{n}`: {s.get('describe', '')}" for n, s in self.cfg["services"].items()) or "- (none)"
         return {"spec_hash": self.run.state["spec_hash"], "tests_dir": self.cfg.tests_dir, "spec_dir": self.cfg.spec_dir,
                 "spec_files": bullet(p.relative_to(self.root) for p in behaviour_spec_files(self.root, self.cfg.spec_dir)),
-                "services": svc, "list_cmd": f"{suite} --list", "rules_cmd": f"{suite} --rules"}
+                "services": svc, "list_cmd": f"{suite} --list", "rules_cmd": f"{suite} --rules", "null_cmd": f"{suite} --null-target"}
 
     def stage_tests(self) -> None:
         r, ts = self.run, self.run.t("tests")

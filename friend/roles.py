@@ -95,7 +95,7 @@ def planner(cfg: Config) -> Role:
 def tester(cfg: Config) -> Role:
     suite = " ".join(cfg.suite_cmd())
     return Role("tester", "tests", WRITER, write=[cfg.tests_dir], read=[cfg.spec_dir, rel_or_abs(cfg.root, KIT / "README.md")],
-                execs=[f"{suite} --list", f"{suite} --rules"])
+                execs=[f"{suite} --list", f"{suite} --rules", f"{suite} --null-target"])
 
 
 def builder(cfg: Config, name: str, target: dict) -> Role:

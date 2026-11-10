@@ -31,7 +31,9 @@ DEFAULTS = {
                "approvals": "approvals.json", "holdout": []},
     "agent": {"command": "claude", "model": "", "effort": "", "max_budget_usd": 20.0, "step_timeout_s": 2400,
               "agent_retries": 1},
-    "workflow": {"max_test_rounds": 3, "auto_approve": False},
+    "workflow": {"max_test_rounds": 3, "auto_approve": False,
+                 "max_untestable_ratio": 0.4,
+                 "vacuity_timeout_s": 2.0},
     "toolchain": {},
     "services": {},
 }

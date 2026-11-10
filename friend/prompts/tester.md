@@ -16,6 +16,7 @@ Requirements:
 - Test scenarios involving several parties with `roles=(...)` and `interop=True`.
 - Platform specs (`$spec_dir/platforms/`) are implementation choices: do not test them except where
   they restate core behaviour.
-- Check your suite: `$list_cmd` (imports and lists tests) and `$rules_cmd` (coverage map).
+- Check your suite: `$list_cmd` (imports and lists tests), `$rules_cmd` (coverage map), and
+  `$null_cmd` (runs it against a do-nothing program: **every test must FAIL there**).
 
 Finish with the structured result.

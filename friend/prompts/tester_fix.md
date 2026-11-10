@@ -6,5 +6,5 @@ keep everything else as is.
 
 $problems
 
-Re-run `$list_cmd` to check, then finish with the structured result (include the full
+Re-run `$list_cmd` and `$null_cmd` to check, then finish with the structured result (include the full
 current `untestable` list).

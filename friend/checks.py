@@ -106,7 +106,7 @@ def list_suite(cfg: Config, suite: str | None = None) -> tuple[list[dict] | None
 
 # ── gates on the generated test suite ─────────────────────────────────────────
 
-def test_gates(cfg: Config, untestable: list[dict]) -> tuple[list[dict], dict]:
+def test_gates(cfg: Config, untestable: list[dict], on_case: Callable[[dict], None] | None = None) -> tuple[list[dict], dict]:
     """Checks a test suite must pass before it may judge any implementation. Returns (failures, coverage report)."""
     tests, err = list_suite(cfg)
     if tests is None:
@@ -117,10 +117,30 @@ def test_gates(cfg: Config, untestable: list[dict]) -> tuple[list[dict], dict]:
     must = [r for r in rules.values() if r.level in ("MUST", "SHOULD")]
     covered = {rid for t in tests for rid in t["rules"]}
     excused = {u["rule"]: u["reason"] for u in untestable}
+    fails = []
+    unknown = sorted(covered - set(rules) - {r.id for r in parse_rules(cfg.root, list((cfg.root / cfg.spec_dir).rglob("*.md")))})
+    if unknown:
+        fails.append(failure("gate:unknown-rules", f"tests cite rule IDs that do not exist: {unknown}", unknown))
     uncovered = [r.id for r in must if r.id not in covered and r.id not in excused]
+    if uncovered:
+        fails.append(failure("gate:coverage", "MUST/SHOULD rules with no test and no untestable justification: "
+                             + ", ".join(uncovered), uncovered))
+    ratio = len([r for r in must if r.id in excused and r.id not in covered]) / max(1, len(must))
+    if ratio > cfg["workflow"]["max_untestable_ratio"]:
+        fails.append(failure("gate:untestable-ratio", f"{ratio:.0%} of MUST/SHOULD rules are declared untestable "
+                             f"(limit {cfg['workflow']['max_untestable_ratio']:.0%}); test them through the control interface"))
+    null = run_suite(cfg, ["--null-target"], on_case, env={"FRIEND_TEST_TIMEOUT": str(cfg["workflow"]["vacuity_timeout_s"])})
+    vacuous = [c["test"] for c in null["cases"] if c["status"] == "pass"]
+    if vacuous:
+        fails.append(failure("gate:vacuous", "these tests PASS against a program that does nothing, so they verify nothing: "
+                             + ", ".join(vacuous)))
+    crashed = [c for c in null["cases"] if c["status"] == "error"]
+    for c in crashed[:5]:
+        fails.append(failure("gate:test-crash", f"{c['test']} raised an exception (a test bug, not an expectation failure) "
+                             f"against the null program:\n{c['detail'][-1200:]}", c["rules"]))
     report = {"tests": len(tests), "must_rules": len(must), "covered": sorted(covered & {r.id for r in must}),
-              "untestable": excused, "uncovered": uncovered}
-    return [], report
+              "untestable": excused, "uncovered": uncovered, "vacuous": vacuous}
+    return fails, report
 
 
 # ── gates on generated code ───────────────────────────────────────────────────

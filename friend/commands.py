@@ -75,7 +75,7 @@ def human(ev: dict, verbose: bool) -> str | None:
         case "test.summary":
             return f"{p}  checks: {ev['passed']} passed, {ev['failed']} failing"
         case "tests.report":
-            return f"{p}  suite: {ev['tests']} tests · {ev['covered']}/{ev['must_rules']} MUST/SHOULD rules covered · {ev['untestable']} untestable"
+            return f"{p}  suite: {ev['tests']} tests · {ev['covered']}/{ev['must_rules']} MUST/SHOULD rules covered · {ev['untestable']} untestable · {ev['vacuous']} vacuous"
         case "gate.failed":
             return f"{p}  ✗ {ev['gate']}: {ev['detail'][:200]}"
         case "spec.questions":
