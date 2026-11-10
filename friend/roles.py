@@ -7,6 +7,7 @@ the plan, so nothing here names a project-specific directory.
   tester    reads spec + testkit docs  writes the generated test suite      → tests
   builder   reads spec + its target    writes its target directory          → one implementation
   arbiter   reads spec + tests         writes nothing                       → verdicts on test disputes
+  saboteur  reads spec + mutant copies writes mutant copies                 → deliberately broken variants
 """
 from __future__ import annotations
 
@@ -58,6 +59,9 @@ SCHEMAS = {
             "rules": {"type": "array", "items": {"type": "string"}},
             "explanation": {"type": "string"},
             "fix": {"type": "string", "description": "for test_wrong: exactly what the test must assert instead; for spec_ambiguous: the question"}}}}}},
+    "saboteur": {"type": "object", "required": ["mutants"], "properties": {
+        "mutants": {"type": "array", "items": {"type": "object", "required": ["dir", "rule", "change"], "properties": {
+            "dir": {"type": "string"}, "rule": {"type": "string"}, "change": {"type": "string"}}}}}},
 }
 
 
@@ -124,3 +128,7 @@ def builder(cfg: Config, name: str, target: dict) -> Role:
 def arbiter(cfg: Config) -> Role:
     return Role("arbiter", "arbitrate", READ_ONLY, read=[cfg.spec_dir, cfg.tests_dir])
 
+
+def saboteur(cfg: Config, name: str, mutant_dirs: list[str]) -> Role:
+    return Role("saboteur", f"audit:{name}", ["Read", "Write", "Edit", "Glob", "Grep"], write=list(mutant_dirs),
+                read=[cfg.spec_dir])

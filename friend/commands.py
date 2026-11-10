@@ -3,7 +3,7 @@
 
 Start here:
   friend spec approve            lint the spec (spec/, next to friend.toml) and record what you approved
-  friend generate                tests and code from the approved spec (plan → tests → build → interop)
+  friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
 
 More:
   friend spec lint | approve
@@ -96,6 +96,10 @@ def human(ev: dict, verbose: bool) -> str | None:
             return "\n".join(f"{p}  ⚖ {v['test']}: {v['verdict']} — {v['explanation'][:160]}" for v in ev["verdicts"])
         case "tests.amended":
             return f"[tests] amended after arbitration: {', '.join(ev['tests'])}; all targets will be re-checked"
+        case "audit.mutant":
+            return f"{p}  mutant violating {ev['rule']}: {ev['outcome']}" + (f" by {', '.join(ev['killed_by'][:3])}" if ev.get("killed_by") else "")
+        case "audit.summary":
+            return f"[audit] kill rate {ev['kill_rate']:.0%} ({ev['killed']}/{ev['valid']})" + (f"; survived: {', '.join(ev['survived'])}" if ev["survived"] else "")
         case "run.finished":
             return f"== run {ev['run']} {ev['status'].upper()} · ${ev['cost_usd']} · " + ", ".join(f"{k}={v}" for k, v in ev["tasks"].items())
         case "approval.rejected":
@@ -226,6 +230,7 @@ def cmd_status(args, cfg) -> int:
         lc = t.get("last_checks")
         extra = f"  checks {lc.get('passed', '-')} passed / {lc['failed']} failing" if lc else ""
         extra += f"  repairs {t['repairs']}" if t.get("repairs") else ""
+        extra += f"  kill rate {t['kill_rate']:.0%}" if "kill_rate" in t else ""
         print(f"  {name:20} {t['status']:18}{extra}" + (f"  error: {t['error']}" if t.get("error") else ""))
         for q in t.get("questions", []):
             print(f"  {'':20} ? {'BLOCKING ' if q.get('blocking') else ''}{q.get('rule', '')} {q['question'][:150]}")

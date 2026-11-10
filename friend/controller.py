@@ -1,6 +1,6 @@
 """The deterministic workflow. Agents write things; this module decides everything else.
 
-  plan ─► [approval] ─► tests ─► [approval] ─► build:<target> (one per target, sequential) ─► interop
+  plan ─► [approval] ─► tests ─► [approval] ─► build:<target> (one per target, sequential) ─► interop ─► audit
 
   plan    planner proposes targets → deterministic validation (retries) → plan.json
   tests   tester writes the suite → gates: imports, rule coverage, untestable limit, vacuity (fix rounds)
@@ -8,6 +8,7 @@
           disputed failing tests → arbiter → test_wrong: tester fixes test, suite re-gated and re-approved,
           every target re-checked | code_wrong: back to repair | spec_ambiguous: blocked
   interop interop-tagged tests over every mixed assignment of targets to roles
+  audit   saboteur makes rule-violating mutants of each passing target; the suite must catch them
 
 Every transition is persisted before the next action, so `generate` can resume after any crash.
 """
@@ -15,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import shutil
 import uuid
 from pathlib import Path
@@ -26,7 +28,7 @@ import checks
 import roles
 from config import Config, expand, load_plan, probe_toolchain, validate_plan_targets
 from runstate import TERMINAL, Run, write_atomic
-from speclib import behaviour_spec_files, platform_spec_files, target_spec_files
+from speclib import behaviour_spec_files, parse_rules, platform_spec_files, target_spec_files
 
 HARNESS = Path(__file__).resolve().parent
 TESTS_MANIFEST = "MANIFEST.json"
@@ -96,6 +98,7 @@ class Controller:
             r.save()
             self.stage_builds(plan)
             self.stage_interop(plan)
+            self.stage_audit(plan)
             final = "passed"
         except Stop as s:
             final = s.status
@@ -509,6 +512,73 @@ class Controller:
             r.set("interop", status="failed", error=f"{res['failed']} interop tests failed" if res["passed"] else "no interop tests ran")
             raise Stop("failed")
         r.set("interop", status="passed")
+
+    # ── stage: audit (mutation testing of the suite) ──
+    def stage_audit(self, plan: dict) -> None:
+        r, n = self.run, self.cfg["workflow"]["audit_mutants"]
+        if n <= 0:
+            return r.set("audit", status="skipped")
+        if r.t("audit")["status"] == "passed":
+            return
+        r.set("audit", status="checking")
+        covered = (self.tests_manifest() or {}).get("report", {}).get("covered", [])
+        results = r.t("audit").setdefault("results", {})
+        for name, t in plan["targets"].items():
+            if name in results:
+                continue
+            results[name] = self.audit_target(name, t, covered, n)
+            r.save()
+        valid = [m for res in results.values() for m in res if m["outcome"] in ("killed", "survived")]
+        killed = sum(m["outcome"] == "killed" for m in valid)
+        rate = killed / len(valid) if valid else 0.0
+        r.emit("audit.summary", killed=killed, valid=len(valid), kill_rate=round(rate, 2),
+               survived=[f"{m['target']}:{m['rule']}" for m in valid if m["outcome"] == "survived"])
+        r.t("audit")["kill_rate"] = rate
+        if rate < self.cfg["workflow"]["audit_min_kill_rate"]:
+            r.set("audit", status="failed", error=f"kill rate {rate:.0%} below {self.cfg['workflow']['audit_min_kill_rate']:.0%}")
+            raise Stop("failed")
+        r.set("audit", status="passed")
+
+    def audit_target(self, name: str, t: dict, covered: list[str], n: int) -> list[dict]:
+        r, task = self.run, f"audit:{name}"
+        rng = random.Random(f"{r.state['run_id']}:{name}")
+        try:  # only rules this target implements itself (TRACE maps them to files, not "n/a")
+            trace = json.loads((self.root / t["dir"] / "TRACE.json").read_text())["rules"]
+        except (OSError, ValueError, KeyError):
+            trace = {}
+        rules_all = [x.id for x in parse_rules(self.root, behaviour_spec_files(self.root, self.cfg.spec_dir))
+                     if x.level == "MUST" and x.id in covered and isinstance(trace.get(x.id), list) and trace[x.id]]
+        chosen = rng.sample(rules_all, min(n, len(rules_all)))
+        dirs = [f"{self.cfg.generated_root}/.mut-{name}-{k}" for k in range(len(chosen))]
+        for d in dirs:
+            p = self.root / d
+            if p.exists():
+                shutil.rmtree(p)
+            shutil.copytree(self.root / t["dir"], p, ignore=shutil.ignore_patterns("__pycache__", checks.MANIFEST))
+        originals = {d: checks.snapshot(self.root / d) for d in dirs}
+        try:
+            r.set(task, status="working", session_id=str(uuid.uuid4()), session_started=False, attempts=0)
+            text = prompt("saboteur", target=name, spec_hash=r.state["spec_hash"],
+                          spec_files=", ".join(f"`{p.relative_to(self.root)}`" for p in target_spec_files(self.root, self.cfg.spec_dir, t["platform_spec"])),
+                          assignments="\n".join(f"- `{d}/`: violate **{rule}**" for d, rule in zip(dirs, chosen)))
+            self.agent_step(task, roles.saboteur(self.cfg, name, dirs), text, False, f"audit-{name}")
+            out = []
+            for d, rule in zip(dirs, chosen):
+                if not any(checks.diff(originals[d], checks.snapshot(self.root / d)).values()):
+                    outcome = "unchanged"
+                elif checks.build(self.cfg, t, d):
+                    outcome = "stillborn"
+                else:
+                    res = checks.run_suite(self.cfg, ["--target", name, "--dir-override", f"{name}={d}"])
+                    outcome = "killed" if res["failed"] else "survived"
+                    killers = sorted({c["test"] for c in res["cases"] if c["status"] != "pass"})
+                r.emit("audit.mutant", task=task, rule=rule, outcome=outcome, **({"killed_by": killers} if outcome == "killed" else {}))
+                out.append({"target": name, "rule": rule, "outcome": outcome})
+            r.set(task, status="done")
+            return out
+        finally:
+            for d in dirs:
+                shutil.rmtree(self.root / d, ignore_errors=True)
 
 
 def preflight(cfg: Config) -> tuple[dict, list[str]]:

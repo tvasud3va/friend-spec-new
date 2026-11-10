@@ -9,6 +9,7 @@ Each invocation of a role consumes its next step (the last one repeats). Step ke
   write:   {relpath: content}  written through the real policy hook ({spec12} → spec hash prefix)
   bypass:  {relpath: content}  written WITHOUT asking the hook (simulates a policy escape)
   bash:    [command, ...]      offered to the hook only (records allow/deny)
+  mutate:  [old, new, file]    applied to every mutant dir named in the prompt
   output:  structured output to return (default: a "complete" result for the role)
   crash:   true                exit 1 without a result
   hang:    seconds             sleep before doing anything (for interrupt/timeout tests)
@@ -30,6 +31,7 @@ DEFAULTS = {
     "builder": {"status": "complete", "summary": "done", "spec_questions": [], "test_disputes": []},
     "tester": {"status": "complete", "summary": "done", "untestable": [], "spec_questions": []},
     "arbiter": {"verdicts": []},
+    "saboteur": {"mutants": []},
     "planner": {"targets": [], "spec_questions": []},
 }
 
@@ -97,6 +99,12 @@ def main() -> int:
     for cmd in step.get("bash") or []:
         if not allowed("Bash", {"command": cmd}):
             denials.append(cmd)
+    if step.get("mutate"):
+        old, new, fname = step["mutate"]
+        for d in re.findall(r"`([^`]+)/`: violate", prompt):
+            p = Path.cwd() / d / fname
+            if allowed("Edit", {"file_path": str(p)}):
+                p.write_text(p.read_text().replace(old, new))
     if step.get("crash"):
         print("fake crash", file=sys.stderr)
         return 1

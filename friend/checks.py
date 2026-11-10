@@ -54,9 +54,9 @@ def failure(name: str, detail: str, rules: list[str] | None = None) -> dict:
 
 # ── builds and suite runs ────────────────────────────────────────────────────
 
-def build(cfg: Config, target: dict) -> list[dict]:
+def build(cfg: Config, target: dict, d: str | None = None) -> list[dict]:
     """Run the target's build command (if any). [] on success, else one failure record."""
-    cmd = expand(target.get("build"), target["dir"])
+    cmd = expand(target.get("build"), d or target["dir"])
     if not cmd:
         return []
     try:

@@ -42,6 +42,8 @@ step_timeout_s = 60
 max_repairs = {max_repairs}
 max_test_rounds = 2
 max_disputes = 1
+audit_mutants = {mutants}
+audit_min_kill_rate = 0.5
 vacuity_timeout_s = 0.5
 max_untestable_ratio = 0.5
 [toolchain.python]
@@ -93,7 +95,7 @@ TESTS_GOOD = {"write": {"tests/generated/test_echo.py": GOOD_TESTS.replace('@tes
 
 
 class Project:
-    def __init__(self, scenario: dict, max_repairs: int = 2) -> None:
+    def __init__(self, scenario: dict, max_repairs: int = 2, mutants: int = 0) -> None:
         self.dir = Path(tempfile.mkdtemp(prefix="friend-selftest-"))
         d = self.dir
         (d / "spec/core").mkdir(parents=True)
@@ -103,7 +105,7 @@ class Project:
         (d / "spec/core/echo.md").write_text(SPEC_CORE)
         (d / "spec/core/interface.md").write_text("# Core: interface\n- **I-1** (MUST) Lines in on stdin, JSON lines out on stdout.\n")
         (d / "spec/platforms/python.md").write_text(SPEC_PY)
-        (d / "friend.toml").write_text(FRIEND_TOML.format(fake=FAKE, max_repairs=max_repairs))
+        (d / "friend.toml").write_text(FRIEND_TOML.format(fake=FAKE, max_repairs=max_repairs, mutants=mutants))
         self.scenario = Path(tempfile.mkdtemp(prefix="friend-fake-")) / "scenario.json"  # outside the project
         self.scenario.write_text(json.dumps(scenario))
         self.env = {**os.environ, "FRIEND_FAKE_SCENARIO": str(self.scenario)}
@@ -368,6 +370,17 @@ class Resumption(unittest.TestCase):
         b = [c for c in p.calls() if c["role"] == "builder"]
         self.assertNotEqual(b[2]["session"], b[0]["session"])
         self.assertFalse(b[2]["resume"])
+        self.assertEqual(ev[-1]["status"], "passed")
+
+
+class Audit(unittest.TestCase):
+    def test_mutants_are_built_and_judged(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD],
+                     "saboteur": [{"mutate": ['.upper()', '', 'main.py']}]}, mutants=2)
+        ev = p.generate("--auto-approve")
+        outcomes = [e["outcome"] for e in ev if e["type"] == "audit.mutant"]
+        self.assertEqual(sorted(outcomes), ["killed", "killed"])
+        self.assertFalse(list((p.dir / "clients").glob(".mut-*")), "mutant dirs must be removed")
         self.assertEqual(ev[-1]["status"], "passed")
 
 

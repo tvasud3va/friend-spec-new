@@ -32,7 +32,7 @@ DEFAULTS = {
     "agent": {"command": "claude", "model": "", "effort": "", "max_budget_usd": 20.0, "step_timeout_s": 2400,
               "agent_retries": 1},
     "workflow": {"max_repairs": 3, "max_test_rounds": 3, "max_disputes": 2, "auto_approve": False,
-                 "max_untestable_ratio": 0.4,
+                 "max_untestable_ratio": 0.4, "audit_mutants": 0, "audit_min_kill_rate": 0.0,
                  "vacuity_timeout_s": 2.0},
     "toolchain": {},
     "services": {},
