@@ -33,6 +33,8 @@ DEFAULTS = {
     "arbiter": {"verdicts": []},
     "saboteur": {"mutants": []},
     "planner": {"targets": [], "spec_questions": []},
+    "author": {"summary": "wrote spec", "files_written": [], "spec_questions": []},
+    "reviewer": {"questions": []},
 }
 
 

@@ -270,12 +270,18 @@ class Safety(unittest.TestCase):
         self.assertEqual((st["plan"]["status"], st["tests"]["status"]), ("stale", "stale"))
 
 
+INTERFACE = """# Core: interface
+Rule prefix I.
+- **I-1** (MUST) The program reads lines from stdin and writes JSON lines to stdout.
+"""
+
+
 def run_mf(cwd: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(MF + list(args), cwd=cwd, capture_output=True, text=True, env=env or os.environ, timeout=300)
 
 
 class NewUserFlow(unittest.TestCase):
-    """init → spec → approve, as a new user would run them."""
+    """init → spec draft → spec check → answer → approve, as a new user would run them."""
 
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="friend-newuser-"))
@@ -287,6 +293,9 @@ class NewUserFlow(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         toml = (self.dir / "friend.toml").read_text().replace('command = "claude"', f'command = "{FAKE}"')
         (self.dir / "friend.toml").write_text(toml)
+
+    def scenario_is(self, sc: dict) -> None:
+        self.scenario.write_text(json.dumps(sc))
 
     def test_init_scaffolds_a_loadable_project(self):
         self.init()
@@ -307,6 +316,41 @@ class NewUserFlow(unittest.TestCase):
         r = run_mf(self.dir, "spec", "approve")
         self.assertEqual(r.returncode, 3)
         self.assertIn("interface", r.stderr)
+
+    def test_draft_with_lint_fix_round(self):
+        self.init()
+        bad = "# Core\n- **E-1** (MUSTY) broken level\n"
+        self.scenario_is({"author": [{"write": {"spec/core/interface.md": INTERFACE, "spec/core/echo.md": bad}},
+                                     {"write": {"spec/core/echo.md": SPEC_CORE},
+                                      "output": {"summary": "fixed", "files_written": ["spec/core/echo.md"],
+                                                 "spec_questions": [{"rule": "E-2", "question": "Unicode upper-casing?", "blocking": False}]}}]})
+        r = run_mf(self.dir, "spec", "draft", env=self.env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("gate:lint", r.stdout)
+        self.assertEqual(run_mf(self.dir, "spec", "approve").returncode, 0)
+        self.assertEqual(json.loads(run_mf(self.dir, "--json", "questions").stdout), [])   # assumptions are not asked
+        qs = json.loads(run_mf(self.dir, "--json", "questions", "--all").stdout)
+        self.assertEqual([(q["question"], q["status"]) for q in qs], [("Unicode upper-casing?", "assumed")])
+        self.assertEqual(run_mf(self.dir, "spec", "draft", env=self.env).returncode, 3)   # won't overwrite
+
+    def test_check_then_answer_updates_the_spec(self):
+        self.init()
+        (self.dir / "spec/core/interface.md").write_text(INTERFACE)
+        (self.dir / "spec/core/echo.md").write_text(SPEC_CORE)
+        q = {"rules": ["E-2"], "question": "Upper-case non-ASCII letters?", "why": "Python and JS differ",
+             "options": ["ASCII only", "full Unicode"], "recommendation": "full Unicode"}
+        self.scenario_is({"reviewer": [{"output": {"questions": [q]}}],
+                          "author": [{"write": {"spec/core/echo.md": SPEC_CORE + "- **E-4** (MUST) Upper-casing uses full Unicode case mapping.\n"}}]})
+        r = run_mf(self.dir, "spec", "check", env=self.env)       # not a TTY: lists questions
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Q1", r.stdout)
+        r = run_mf(self.dir, "answer", "Q1", "2", env=self.env)   # option number → option text
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("E-4", (self.dir / "spec/core/echo.md").read_text())
+        qs = json.loads(run_mf(self.dir, "--json", "questions", "--all").stdout)
+        self.assertEqual((qs[0]["status"], qs[0]["answer"]), ("answered", "full Unicode"))
+        calls = [json.loads(l) for l in self.scenario.with_suffix(".calls").read_text().splitlines()]
+        self.assertIn("full Unicode", calls[-1]["prompt"])
 
 
 class Operations(unittest.TestCase):

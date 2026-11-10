@@ -79,7 +79,7 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
     available = detect()
     name = name or ask("Project name", root.name) or root.name
     if describe is None:
-        describe = ask("What are you building? (one or two sentences, kept in spec/BRIEF.md)", "")
+        describe = ask("What are you building? (one or two sentences; used to draft the spec)", "")
     if not langs:
         default = "python" if available["python"] else next((l for l, ok in available.items() if ok), "python")
         langs = [l.strip() for l in ask(f"Target languages, comma-separated ({', '.join(LANGUAGES)})", default).split(",") if l.strip()]
@@ -103,7 +103,7 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
     (root / "friend.toml").write_text(FRIEND_TOML.format(name=name, generated=DEFAULT_GENERATED, model=DEFAULT_MODEL, toolchain=tc))
     (root / "spec/README.md").write_text((TEMPLATES / "spec_README.md").read_text())
     (root / "spec/extensions/README.md").write_text((TEMPLATES / "extensions_README.md").read_text())
-    (root / "spec/BRIEF.md").write_text(f"# Brief: {name}\n\n{describe or '(describe the application here)'}\n")
+    (root / "spec/BRIEF.md").write_text(f"# Brief: {name}\n\n{describe or '(describe the application here, then run `friend spec draft`)'}\n")
     for l in langs:
         text = (TEMPLATES / "platforms" / LANGUAGES[l]["template"]).read_text().replace("{generated}", DEFAULT_GENERATED)
         (root / "spec/platforms" / LANGUAGES[l]["template"]).write_text(text)
@@ -120,6 +120,7 @@ def init(root: Path, name: str | None, describe: str | None, langs: list[str], i
             print("  ok" if r.returncode == 0 else f"  npm failed:\n{r.stderr[-800:]}")
         else:
             print("run `cd tools && npm install` to install the pinned TypeScript compiler")
-    print("\nnext:\n  write spec/core/ (the rule format is in spec/README.md)\n  friend spec approve\n  friend generate")
+    print("\nnext:\n  friend spec draft      # an agent drafts spec/core/ from spec/BRIEF.md (or write it yourself)\n"
+          "  friend spec check      # find ambiguities and answer them\n  friend spec approve\n  friend generate")
     return 0
 

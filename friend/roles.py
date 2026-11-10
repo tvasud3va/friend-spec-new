@@ -8,6 +8,8 @@ the plan, so nothing here names a project-specific directory.
   builder   reads spec + its target    writes its target directory          → one implementation
   arbiter   reads spec + tests         writes nothing                       → verdicts on test disputes
   saboteur  reads spec + mutant copies writes mutant copies                 → deliberately broken variants
+  author    reads spec + testkit docs  writes spec/                         → drafts and edits the spec
+  reviewer  reads spec + testkit docs  writes nothing                       → ambiguity questions
 """
 from __future__ import annotations
 
@@ -59,6 +61,17 @@ SCHEMAS = {
             "rules": {"type": "array", "items": {"type": "string"}},
             "explanation": {"type": "string"},
             "fix": {"type": "string", "description": "for test_wrong: exactly what the test must assert instead; for spec_ambiguous: the question"}}}}}},
+    "author": {"type": "object", "required": ["summary", "files_written", "spec_questions"], "properties": {
+        "summary": {"type": "string"},
+        "files_written": {"type": "array", "items": {"type": "string"}},
+        "spec_questions": QUESTIONS}},
+    "reviewer": {"type": "object", "required": ["questions"], "properties": {
+        "questions": {"type": "array", "items": {"type": "object", "required": ["rules", "question", "why", "options", "recommendation"], "properties": {
+            "rules": {"type": "array", "items": {"type": "string"}},
+            "question": {"type": "string"},
+            "why": {"type": "string", "description": "what could differ between implementations or tests"},
+            "options": {"type": "array", "items": {"type": "string"}, "description": "empty for an open question"},
+            "recommendation": {"type": "string"}}}}}},
     "saboteur": {"type": "object", "required": ["mutants"], "properties": {
         "mutants": {"type": "array", "items": {"type": "object", "required": ["dir", "rule", "change"], "properties": {
             "dir": {"type": "string"}, "rule": {"type": "string"}, "change": {"type": "string"}}}}}},
@@ -127,6 +140,15 @@ def builder(cfg: Config, name: str, target: dict) -> Role:
 
 def arbiter(cfg: Config) -> Role:
     return Role("arbiter", "arbitrate", READ_ONLY, read=[cfg.spec_dir, cfg.tests_dir])
+
+
+def author(cfg: Config) -> Role:
+    return Role("author", "spec", ["Read", "Write", "Edit", "Glob", "Grep"], write=[cfg.spec_dir],
+                read=[rel_or_abs(cfg.root, KIT / "README.md")])
+
+
+def reviewer(cfg: Config) -> Role:
+    return Role("reviewer", "spec-review", READ_ONLY, read=[cfg.spec_dir, rel_or_abs(cfg.root, KIT / "README.md")])
 
 
 def saboteur(cfg: Config, name: str, mutant_dirs: list[str]) -> Role:

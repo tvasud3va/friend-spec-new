@@ -2,12 +2,13 @@
 """friend: describe an app, approve a spec, get independently tested implementations.
 
 Start here:
-  friend init                    scaffold a project, then write the spec in spec/ (format: spec/README.md)
-  friend spec approve            lint the spec and record what you approved
+  friend init                    scaffold a project; describe your idea in spec/BRIEF.md
+  friend spec draft              an agent drafts the spec from the brief (then check, approve)
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
 
 More:
-  friend spec lint | approve
+  friend spec draft | refine "…" | check | lint | approve
+  friend questions · friend answer ID "decision" | --dismiss · friend answer all --recommended
   friend status · friend approve spec|plan|tests
   friend generate [--fresh] [--yes]
 
@@ -29,6 +30,7 @@ import approvals  # noqa: E402
 from config import ConfigError, load  # noqa: E402
 from controller import Controller, config_hash, preflight  # noqa: E402
 import project  # noqa: E402
+import specflow  # noqa: E402
 from runstate import Run  # noqa: E402
 from speclib import lint  # noqa: E402
 
@@ -191,6 +193,11 @@ def cmd_generate(args, cfg) -> int:
             run.emit("run.interrupted")
             print("\ninterrupted; state saved. Run `friend generate` again to resume.", file=sys.stderr)
             return 130
+        finally:
+            qs = [q for t in run.state["tasks"].values() for q in t.get("questions", [])]
+            added = specflow.add_questions(cfg, qs, source=f"run {run.state['run_id']}")
+        if added and not args.json:
+            print(f"{len(added)} new spec questions: `friend questions`")
         return EXIT[final]
     finally:
         lock.unlink(missing_ok=True)
@@ -243,7 +250,25 @@ def cmd_init(args, root: Path) -> int:
     return project.init(root, args.name, args.describe, args.lang or [], install=not args.no_install, force=args.force)
 
 
+def show_spec_result(ok: bool, out: dict, problems: list[str], cfg, hint: bool = True) -> int:
+    if out.get("summary"):
+        print(out["summary"])
+    if out.get("files_written"):
+        print("files: " + ", ".join(out["files_written"]))
+    added = specflow.add_questions(cfg, out.get("spec_questions") or [], source="spec author", status="assumed")
+    for q in added:
+        tag = "BLOCKING, answer with `friend answer`" if q["status"] == "open" else "assumed"
+        print(f"  {q['id']} [{', '.join(q['rules']) or '-'}] {q['question']}" + (f"  ({tag}: {q['recommendation']})" if q["recommendation"] else f"  ({tag})"))
+    if not ok:
+        print("spec still has problems:\n  " + "\n  ".join(problems), file=sys.stderr)
+        return 1
+    if hint:
+        print("\nreview the changes in spec/, then: friend spec check (find ambiguities) · friend spec approve")
+    return 0
+
+
 def cmd_spec(args, cfg) -> int:
+    sink = make_sink(args.json, getattr(args, "verbose", False)) if args.json or getattr(args, "verbose", False) else make_quiet_sink()
     if args.spec_cmd == "lint":
         problems = lint(cfg.root, cfg.spec_dir)
         print("\n".join(problems) or "ok")
@@ -251,7 +276,107 @@ def cmd_spec(args, cfg) -> int:
     if args.spec_cmd == "approve":
         args.artifact = "spec"
         return cmd_approve(args, cfg)
+    if args.spec_cmd == "draft":
+        brief = cfg.path(cfg.spec_dir) / "BRIEF.md"
+        if not brief.exists() or "(describe the application here" in brief.read_text():
+            print(f"write what you want to build in {brief.relative_to(cfg.root)} first", file=sys.stderr)
+            return 3
+        if any((cfg.path(cfg.spec_dir) / "core").glob("*.md")) and not args.force:
+            print("spec/core/ already has files; use `friend spec refine \"...\"` to change it (or --force to redraft)", file=sys.stderr)
+            return 3
+        print("drafting the spec from BRIEF.md …")
+        return show_spec_result(*specflow.draft(cfg, sink), cfg)
+    if args.spec_cmd == "refine":
+        print("revising the spec …")
+        return show_spec_result(*specflow.refine(cfg, args.instruction, sink), cfg)
+    if args.spec_cmd == "check":
+        problems = lint(cfg.root, cfg.spec_dir)
+        if problems:
+            print("spec lint failed:\n  " + "\n  ".join(problems), file=sys.stderr)
+            return 1
+        print("reviewing the spec for ambiguities …")
+        ok, found = specflow.review(cfg, sink, args.max)
+        if not ok:
+            print("review failed (see .friend/spec/runs)", file=sys.stderr)
+            return 1
+        added = specflow.add_questions(cfg, found, source="spec review")
+        if not added:
+            print("no new questions")
+            return 0
+        if args.json or not sys.stdin.isatty():
+            for q in added:
+                print(f"{q['id']} [{', '.join(q['rules']) or '-'}] {q['question']}")
+            print("answer with `friend answer ID \"decision\"`")
+            return 0
+        decided = specflow.interactive_answers(added, input)
+        return apply_decisions(cfg, decided, sink)
     return 3
+
+
+def apply_decisions(cfg, decided: dict, sink, hint: bool = True) -> int:
+    if not decided:
+        return 0
+    specflow.set_status(cfg, decided)
+    answered = [q for q in specflow.load_questions(cfg) if q["id"] in decided and decided[q["id"]][0] == "answered"]
+    if not answered:
+        return 0
+    print(f"\nwriting {len(answered)} decision(s) into the spec …")
+    ok, out, problems = specflow.apply_answers(cfg, answered, sink)
+    return show_spec_result(ok, out, problems, cfg, hint=hint)
+
+
+def cmd_questions(args, cfg) -> int:
+    qs = [q for q in specflow.load_questions(cfg) if args.all or q["status"] == "open"]
+    if args.json:
+        print(json.dumps(qs, indent=2))
+        return 0
+    if not qs:
+        assumed = sum(q["status"] == "assumed" for q in specflow.load_questions(cfg))
+        print("no open questions" + (f" ({assumed} assumptions recorded: `friend questions --all`)" if assumed else ""))
+    for q in qs:
+        print(f"{q['id']} [{q['status']}] [{', '.join(q['rules']) or '-'}] {q['question']}")
+        for i, o in enumerate(q.get("options") or [], 1):
+            print(f"     {i}) {o}")
+        if q.get("recommendation"):
+            print(f"     recommended: {q['recommendation']}")
+        if q.get("answer"):
+            print(f"     answer: {q['answer']}")
+    return 0
+
+
+def cmd_answer(args, cfg) -> int:
+    qs = {q["id"]: q for q in specflow.load_questions(cfg)}
+    if args.id == "all":
+        if not args.recommended:
+            print("`friend answer all` needs --recommended (accept every open question's recommendation)", file=sys.stderr)
+            return 3
+        decided = {i: ("answered", q["recommendation"]) for i, q in qs.items() if q["status"] == "open" and q.get("recommendation")}
+        print(f"accepting the recommendation for {len(decided)} open question(s)")
+        return apply_decisions(cfg, decided, make_quiet_sink())
+    if args.id not in qs:
+        print(f"unknown question {args.id}", file=sys.stderr)
+        return 3
+    if args.dismiss:
+        return apply_decisions(cfg, {args.id: ("dismissed", None)}, make_quiet_sink())
+    text = args.decision
+    opts = qs[args.id].get("options") or []
+    if text and text.isdigit() and 1 <= int(text) <= len(opts):
+        text = opts[int(text) - 1]
+    if not text:
+        print("give a decision (text or option number) or --dismiss", file=sys.stderr)
+        return 3
+    return apply_decisions(cfg, {args.id: ("answered", text)}, make_quiet_sink())
+
+
+def make_quiet_sink():
+    shown = {"gate.failed", "policy.denied", "agent.retry", "step.started", "step.finished"}
+
+    def sink(ev: dict) -> None:
+        if ev["type"] in shown:
+            line = human(ev, False)
+            if line:
+                print(line, flush=True)
+    return sink
 
 
 def main() -> int:
@@ -267,8 +392,21 @@ def main() -> int:
     i.add_argument("--force", action="store_true")
     sp = sub.add_parser("spec")
     ssub = sp.add_subparsers(dest="spec_cmd", required=True)
+    sd = ssub.add_parser("draft")
+    sd.add_argument("--force", action="store_true")
+    sr = ssub.add_parser("refine")
+    sr.add_argument("instruction")
+    sc = ssub.add_parser("check")
+    sc.add_argument("--max", type=int, default=8)
     sl = ssub.add_parser("lint")
     sa = ssub.add_parser("approve")
+    q = sub.add_parser("questions")
+    q.add_argument("--all", action="store_true")
+    an = sub.add_parser("answer")
+    an.add_argument("id")
+    an.add_argument("decision", nargs="?")
+    an.add_argument("--dismiss", action="store_true")
+    an.add_argument("--recommended", action="store_true", help="with ID 'all': accept every recommendation")
     a = sub.add_parser("approve")
     a.add_argument("artifact", nargs="?", default="spec", choices=approvals.KINDS)
     g = sub.add_parser("generate")
@@ -277,7 +415,7 @@ def main() -> int:
     g.add_argument("-v", "--verbose", action="store_true")
     s = sub.add_parser("status")
     s.add_argument("--run")
-    for p in (a, g, s, i, sl, sa):
+    for p in (a, g, s, i, sd, sr, sc, sl, sa, q, an):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.cmd == "init":
@@ -291,7 +429,8 @@ def main() -> int:
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 3
-    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status, "spec": cmd_spec}[args.cmd](args, cfg)
+    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status, "spec": cmd_spec,
+            "questions": cmd_questions, "answer": cmd_answer}[args.cmd](args, cfg)
 
 
 if __name__ == "__main__":
