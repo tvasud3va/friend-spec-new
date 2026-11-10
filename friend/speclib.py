@@ -94,4 +94,6 @@ def lint(root: Path, spec_dir: str) -> list[str]:
         problems.append(f"{spec_dir}/core/ needs an interface file (e.g. interface.md) defining how programs are launched, driven and observed")
     if not platform_spec_files(root, spec_dir):
         problems.append(f"{spec_dir}/platforms/ has no platform specs: nothing to generate")
+    import contract  # the sprint contract is part of the spec; its rule references must resolve
+    problems += contract.lint(root, spec_dir, rules)
     return problems

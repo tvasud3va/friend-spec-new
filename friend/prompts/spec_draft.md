@@ -11,6 +11,11 @@ Write `spec/core/*.md`:
 - One or more behaviour files (e.g. `spec/core/behaviour.md`, `spec/core/storage.md`): state, rules, edge cases,
   error handling, persistence. Each file declares its rule prefix and numbers its rules.
 
+Then write `spec/DONE.md`, the **sprint contract** (format in `spec/README.md`): start with `# Done means` and
+one sentence, then 5-15 items `- [ ] **D-1** <outcome>. (rules: <IDs>)`. Each item is an outcome a non-programmer
+could check by using the program, tied to the rules that make it precise. Together the items should cover every
+MUST behaviour a user would notice.
+
 Scope: exactly what the brief asks for, as the smallest coherent product. Do not invent features. Where the
 brief is silent but a decision is needed, choose the simplest behaviour, write it as a rule, and record it as
 a question with your assumption so the user can confirm. Every MUST must be observable through the control interface.

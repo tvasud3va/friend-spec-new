@@ -157,3 +157,6 @@ def interactive_answers(qs: list[dict], read: Callable[[str], str]) -> dict[str,
         decided[q["id"]] = ("answered", ans)
     return decided
 
+
+def contract(cfg: Config, sink) -> tuple[bool, dict, list[str]]:
+    return _author(cfg, prompt("spec_contract"), sink, "contract")

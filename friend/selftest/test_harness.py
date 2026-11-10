@@ -50,6 +50,12 @@ max_untestable_ratio = 0.5
 cmd = "python3"
 """
 
+DONE = """# Done means
+The echo tool is done when:
+- [ ] **D-1** Typed lines come back unchanged. (rules: E-1, I-1)
+- [ ] **D-2** `upper` lines come back in capitals. (rules: E-2)
+"""
+
 PLAN_OUT = {"targets": [{"name": "py", "platform_spec": "spec/platforms/python.md", "comment": "#",
                          "build": [], "launch": ["python3", "{dir}/main.py"], "sources": ["*.py"],
                          "selfcheck": [["python3", "-m", "py_compile", "{dir}/main.py"]]}], "spec_questions": []}
@@ -148,6 +154,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(m["model"], "fake-model")
         self.assertIn("python", m["toolchain"])
         self.assertEqual(st["run"]["tasks"]["interop"]["status"], "skipped")  # one target
+        p.friend("verify", check_code=0)
 
     def test_approval_gates_pause_and_resume(self):
         p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
@@ -259,6 +266,31 @@ class Safety(unittest.TestCase):
         ev = p.generate("--auto-approve", code=1)
         self.assertIn("policy", p.state()["run"]["tasks"]["build:py"]["error"])
 
+    def test_hand_edit_is_detected_by_verify(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
+        p.generate("--auto-approve")
+        f = p.dir / "clients/py/main.py"
+        f.write_text(f.read_text() + "# tweak\n")
+        r = p.friend("verify", check_code=1)
+        self.assertIn("hand edits", r.stdout + r.stderr)
+
+    def test_verify_proves_the_contract(self):
+        p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
+        (p.dir / "spec/DONE.md").write_text(DONE)
+        p.friend("approve", "spec", check_code=0)
+        p.generate("--auto-approve")
+        r = p.friend("verify", check_code=0)
+        proof = (p.dir / ".friend/proof.md").read_text()
+        self.assertIn("Verdict: DONE", proof)
+        self.assertIn("✓ D-1 Typed lines come back", proof)
+        self.assertIn("Tests have teeth", proof)
+        f = p.dir / "clients/py/main.py"                      # break E-2: D-2 must fail, verdict NOT DONE
+        f.write_text(f.read_text().replace('line[6:].upper() if line.startswith("upper ") else line', "line"))
+        p.friend("verify", check_code=1)
+        proof = (p.dir / ".friend/proof.md").read_text()
+        self.assertIn("✗ D-2", proof)
+        self.assertIn("NOT DONE", proof)
+
     def test_spec_change_invalidates_approvals(self):
         p = Project({"planner": [{"output": PLAN_OUT}], "tester": [TESTS_GOOD], "builder": [BUILD_GOOD]})
         p.generate("--auto-approve")
@@ -351,6 +383,15 @@ class NewUserFlow(unittest.TestCase):
         self.assertEqual((qs[0]["status"], qs[0]["answer"]), ("answered", "full Unicode"))
         calls = [json.loads(l) for l in self.scenario.with_suffix(".calls").read_text().splitlines()]
         self.assertIn("full Unicode", calls[-1]["prompt"])
+
+    def test_contract_must_cite_existing_rules(self):
+        self.init()
+        (self.dir / "spec/core/interface.md").write_text(INTERFACE)
+        (self.dir / "spec/core/echo.md").write_text(SPEC_CORE)
+        (self.dir / "spec/DONE.md").write_text(DONE.replace("E-2", "E-9"))
+        r = run_mf(self.dir, "spec", "approve")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("unknown rule E-9", r.stderr)
 
 
 class Operations(unittest.TestCase):

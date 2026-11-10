@@ -35,7 +35,7 @@ generated = "{generated}"            # each target is generated into {generated}
 tests = "tests/generated"
 plan = "plan.json"
 approvals = "approvals.json"
-holdout = []                       # hand-written suites never shown to agents
+holdout = []                       # hand-written suites never shown to agents (`friend verify --holdout`)
 
 [agent]
 command = "claude"

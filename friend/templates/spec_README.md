@@ -8,6 +8,7 @@ code is wrong. Behaviour questions are answered here, never by reading generated
 | Path | Content | Applies to |
 |---|---|---|
 | `BRIEF.md` | the idea, in your words (context, not requirements) | n/a |
+| `DONE.md` | **the sprint contract**: what done means, in plain language, each item tied to rules | proof (`friend verify`) |
 | `core/*.md` | behaviour every implementation shares | all targets |
 | `core/interface.md` | **the control interface**: how a program is launched, driven and observed. Required: it is what makes the spec testable | all targets |
 | `platforms/<target>.md` | language/runtime choices only; must not change core behaviour | one target |
@@ -32,3 +33,15 @@ Every normative statement is a rule on its own bullet line:
 - Every MUST should be observable through the control interface, or the tests cannot check it.
 
 `friend spec approve` lints these rules and records the spec hash. Generation refuses an unapproved spec.
+
+## Sprint contract (DONE.md)
+
+`DONE.md` says what "done" means for a person, not a program. Each item is an outcome anyone can check, tied
+to the rules that make it precise:
+
+```
+- [ ] **D-3** A message sent while offline is delivered once the sender reconnects. (rules: C-7, C-8)
+```
+
+It is approved with the spec. `friend verify` proves it: an item is ✓ only when every rule it cites has tests
+and all of them pass on every target. The result, with the other proof checks, goes to `.friend/proof.md`.

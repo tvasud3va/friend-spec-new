@@ -3,16 +3,17 @@
 
 Start here:
   friend init                    scaffold a project; describe your idea in spec/BRIEF.md
-  friend spec draft              an agent drafts the spec from the brief (then check, approve)
+  friend spec draft              an agent drafts the spec and sprint contract from the brief (then check, approve)
   friend generate                tests and code from the approved spec (plan → tests → build → interop → audit)
+  friend verify                  prove the sprint contract: every check re-run, no agent → .friend/proof.md
   friend run TARGET [args…]      run what was built
 
 More:
   friend doctor                  check Claude Code login, toolchains, spec and approvals
-  friend spec draft | refine "…" | check | lint | approve
+  friend spec draft | refine "…" | check | contract | lint | approve
   friend questions · friend answer ID "decision" | --dismiss · friend answer all --recommended
   friend status · friend report · friend clean [--all] · friend approve spec|plan|tests
-  friend generate [--fresh] [--yes] [--budget USD]
+  friend generate [--fresh] [--yes] [--budget USD] · friend verify [--no-holdout]
 
 Global: --root DIR (default: nearest directory upwards with friend.toml), --json (machine output).
 Exit codes: 0 ok · 1 failed · 2 blocked on spec questions · 3 refused (config, preflight, approval, busy)
@@ -25,12 +26,14 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import approvals  # noqa: E402
-from config import ConfigError, load  # noqa: E402
+import checks  # noqa: E402
+from config import ConfigError, load, load_plan  # noqa: E402
 from controller import Controller, config_hash, preflight  # noqa: E402
 import project  # noqa: E402
 import specflow  # noqa: E402
@@ -113,6 +116,8 @@ def human(ev: dict, verbose: bool) -> str | None:
             return f"{p}rejected {ev['artifact']}: regenerating with your feedback"
         case "budget.exceeded":
             return f"== paused: spent ${ev['spent']} of the ${ev['budget']} budget. Rerun with a higher --budget to continue"
+        case "verify.result":
+            return f"== verify {'OK' if ev['ok'] else 'FAILED'}"
     return None
 
 
@@ -252,6 +257,122 @@ def cmd_status(args, cfg) -> int:
     return 0
 
 
+def cmd_verify(args, cfg) -> int:
+    """Prove the sprint contract: re-run every deterministic check (no agent) and write .friend/proof.md."""
+    from contract import Check
+    out = make_sink(args.json, False)
+    ev = lambda type, **f: out({"type": type, "run": "verify", **f})  # noqa: E731
+    say = (lambda msg: None) if args.json else (lambda msg: print(msg, flush=True))  # noqa: E731
+    proof: list[Check] = []
+    def add(c: Check) -> None:
+        proof.append(c)
+        ev("proof.check", name=c.name, status=c.status, detail=c.detail)
+
+    arts = {k: approvals.status(cfg, k) for k in approvals.KINDS}
+    bad = {k: v for k, v in arts.items() if v[0] != "approved"}
+    plan = load_plan(cfg)
+    data = approvals.load(cfg)
+    spec_hash = (data.get("spec") or {}).get("hash", "")
+    add(Check("Spec, plan and tests approved", "fail" if bad or plan is None else "pass",
+              "; ".join(f"{k} {s}" + (f" ({w})" if w else "") for k, (s, w) in bad.items())
+              or f"spec {spec_hash[:12]} · plan and tests approved against it"))
+    if bad or plan is None:
+        return finish_verify(args, cfg, spec_hash, [], proof, ev)
+    tests_hash = data["tests"]["hash"]
+
+    say("checking the test suite (coverage, and that every test fails against a do-nothing program) …")
+    manifest = checks.read_tests_manifest(cfg) or {}
+    untestable = manifest.get("untestable") or []
+    gate_fails, rep = checks.test_gates(cfg, untestable)
+    names = {f["name"] for f in gate_fails}
+    if rep:
+        add(Check("Every MUST/SHOULD rule has a test", "fail" if names & {"gate:coverage", "gate:unknown-rules", "gate:untestable-ratio"} else "pass",
+                  f"{len(rep['covered'])}/{rep['must_rules']} covered by {rep['tests']} tests"
+                  + (f" · {len(rep['untestable'])} declared untestable ({', '.join(rep['untestable'])})" if rep["untestable"] else "")
+                  + (f" · uncovered: {', '.join(rep['uncovered'])}" if rep["uncovered"] else "")))
+        add(Check("Tests have teeth (every test fails against a do-nothing program)",
+                  "fail" if names & {"gate:vacuous", "gate:test-crash"} else "pass",
+                  f"vacuous: {', '.join(rep['vacuous'])}" if rep["vacuous"] else f"{rep['tests']}/{rep['tests']} tests fail against the null program"))
+    else:
+        add(Check("Test suite imports", "fail", gate_fails[0]["detail"][:300] if gate_fails else "no tests"))
+    untestable_map = {u["rule"]: u.get("reason", "") for u in untestable}
+
+    suites = [None] + list(cfg["layout"]["holdout"] if not args.no_holdout else [])
+    cases: dict[str, list[dict]] = {}
+    def show_failures(label: str):
+        def on_case(c: dict) -> None:
+            if args.json:
+                ev("test.case", task=label, **{k: v for k, v in c.items() if k != "type"})
+            elif c["status"] != "pass":
+                first = c["detail"].splitlines()[0][:140] if c.get("detail") else ""
+                print(f"  ✗ {label}: {c['name']}" + (f" — {first}" if first else ""), flush=True)
+        return on_case
+    for name, t in plan["targets"].items():
+        say(f"building and testing {name} …")
+        fails = checks.build(cfg, t)
+        add(Check(f"{name}: builds", "fail" if fails else "pass", fails[0]["detail"][:300] if fails else "ok"))
+        if fails:
+            continue
+        for suite in suites:
+            label = name + (f" · {suite}" if suite else "")
+            res = checks.run_suite(cfg, ["--target", name], show_failures(label), suite=suite)
+            cases[label] = res["cases"]
+            total = res["passed"] + res["failed"]
+            add(Check(f"{name}: {'holdout suite ' + suite if suite else 'generated suite'} passes",
+                      "pass" if res["failed"] == 0 and total else "fail", f"{res['passed']}/{total} tests pass"))
+        static = checks.static_gates(cfg, name, t, spec_hash) + checks.manifest_check(cfg, name, t, spec_hash, tests_hash)
+        add(Check(f"{name}: generated from this spec, untouched by hand", "fail" if static else "pass",
+                  "; ".join(f["detail"][:160] for f in static[:3]) or "headers, TRACE coverage and manifest match"))
+    tests_listed, _ = checks.list_suite(cfg)
+    if len(plan["targets"]) > 1:
+        for suite in suites:
+            listed = tests_listed if suite is None else (checks.list_suite(cfg, suite)[0] or [])
+            if not any(t["interop"] for t in listed or []):
+                continue
+            say("testing the targets together (interop) …" if suite is None else f"interop · {suite} …")
+            label = "interop" + (f" · {suite}" if suite else "")
+            res = checks.run_suite(cfg, ["--interop", ",".join(plan["targets"])], show_failures(label), suite=suite)
+            cases[label] = res["cases"]
+            total = res["passed"] + res["failed"]
+            add(Check(f"targets work together ({label})", "pass" if res["failed"] == 0 and total else "fail",
+                      f"{res['passed']}/{total} mixed-target runs pass"))
+    n_mut = cfg["workflow"]["audit_mutants"]
+    run = Run.load(cfg.root / ".friend")
+    audit = (run.state["tasks"].get("audit") if run and run.state.get("spec_hash") == spec_hash else None) or {}
+    if not n_mut:
+        add(Check("Mutation audit", "skipped", "disabled in friend.toml"))
+    elif "kill_rate" in audit:
+        need = cfg["workflow"]["audit_min_kill_rate"]
+        add(Check("Mutation audit: tests catch deliberately broken code", "pass" if audit["kill_rate"] >= need else "fail",
+                  f"kill rate {audit['kill_rate']:.0%} (needs {need:.0%}) in run {run.state['run_id']}"))
+    else:
+        add(Check("Mutation audit: tests catch deliberately broken code", "unproven",
+                  "not measured for this spec; `friend generate` runs it"))
+    import contract
+    items, _ = contract.parse(cfg.root, cfg.spec_dir)
+    return finish_verify(args, cfg, spec_hash, contract.judge_items(items, cases, untestable_map), proof, ev)
+
+
+def finish_verify(args, cfg, spec_hash: str, items: list, proof: list, ev) -> int:
+    import contract
+    from config import agent_cli_version
+    done = all(c.status in ("pass", "skipped") for c in [*items, *proof])
+    for c in items:
+        ev("contract.item", name=c.name, status=c.status, detail=c.detail)
+    has_contract = contract.path(cfg.root, cfg.spec_dir).exists()
+    header = [f"- spec `{spec_hash[:12]}` · model `{cfg['agent']['model']}` · {agent_cli_version(cfg) or 'agent CLI not found'}",
+              f"- verified {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+    if not has_contract:
+        header.append("- no sprint contract (spec/DONE.md); only the proof checks apply. `friend spec contract` writes one.")
+    text = contract.render(cfg.root.name, header, items, proof, done)
+    (cfg.root / ".friend").mkdir(exist_ok=True)
+    (cfg.root / ".friend" / "proof.md").write_text(text)
+    if not args.json:
+        print("\n" + text + f"\n(saved to .friend/proof.md)")
+    ev("verify.result", ok=done)
+    return 0 if done else 1
+
+
 def cmd_clean(args, cfg) -> int:
     root = cfg.path(cfg.generated_root)
     if root.exists():
@@ -342,6 +463,9 @@ def cmd_spec(args, cfg) -> int:
     if args.spec_cmd == "refine":
         print("revising the spec …")
         return show_spec_result(*specflow.refine(cfg, args.instruction, sink), cfg)
+    if args.spec_cmd == "contract":
+        print("writing the sprint contract (spec/DONE.md) …")
+        return show_spec_result(*specflow.contract(cfg, sink), cfg)
     if args.spec_cmd == "check":
         problems = lint(cfg.root, cfg.spec_dir)
         if problems:
@@ -453,6 +577,7 @@ def main() -> int:
     sc = ssub.add_parser("check")
     sc.add_argument("--max", type=int, default=8)
     sl = ssub.add_parser("lint")
+    sk = ssub.add_parser("contract", help="write spec/DONE.md (the sprint contract) for an existing spec")
     sa = ssub.add_parser("approve")
     q = sub.add_parser("questions")
     q.add_argument("--all", action="store_true")
@@ -475,9 +600,11 @@ def main() -> int:
     g.add_argument("-v", "--verbose", action="store_true")
     s = sub.add_parser("status")
     s.add_argument("--run")
+    v = sub.add_parser("verify")
+    v.add_argument("--no-holdout", action="store_true", help="skip the hand-written suites in [layout].holdout")
     c = sub.add_parser("clean")
     c.add_argument("--all", action="store_true")
-    for p in (a, g, s, c, i, d, sd, sr, sc, sl, sa, q, an, rn, rp):
+    for p in (a, g, s, v, c, i, d, sd, sr, sc, sl, sk, sa, q, an, rn, rp):
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     args = ap.parse_args()
     if args.cmd == "init":
@@ -491,7 +618,7 @@ def main() -> int:
     except ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 3
-    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status,
+    return {"approve": cmd_approve, "generate": cmd_generate, "status": cmd_status, "verify": cmd_verify,
             "clean": cmd_clean, "doctor": cmd_doctor, "spec": cmd_spec, "questions": cmd_questions,
             "answer": cmd_answer, "run": cmd_run, "report": cmd_report}[args.cmd](args, cfg)
 

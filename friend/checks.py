@@ -97,6 +97,14 @@ def run_suite(cfg: Config, args: list[str], on_case: Callable[[dict], None] | No
     return {"passed": sum(c["status"] == "pass" for c in cases), "failed": len(failures), "failures": failures, "cases": cases}
 
 
+def read_tests_manifest(cfg: Config) -> dict | None:
+    p = cfg.path(cfg.tests_dir) / "MANIFEST.json"
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def list_suite(cfg: Config, suite: str | None = None) -> tuple[list[dict] | None, str]:
     proc = subprocess.run([sys.executable, *cfg.suite_cmd(suite)[1:], "--list"], cwd=cfg.root, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -181,3 +189,19 @@ def write_manifest(cfg: Config, name: str, target: dict, meta: dict) -> dict:
     (d / MANIFEST).write_text(json.dumps(m, indent=2) + "\n")
     return m
 
+
+def manifest_check(cfg: Config, name: str, target: dict, spec_hash: str, tests_hash: str | None) -> list[dict]:
+    d = cfg.root / target["dir"]
+    try:
+        m = json.loads((d / MANIFEST).read_text())
+    except (OSError, ValueError):
+        return [failure("gate:manifest", f"{name}: no {MANIFEST}; not produced by a passing generation run")]
+    fails = []
+    if m.get("spec_hash") != spec_hash:
+        fails.append(failure("gate:manifest", f"{name}: generated from spec {str(m.get('spec_hash'))[:12]}, approved spec is {spec_hash[:12]}; regenerate"))
+    if tests_hash and m.get("tests_hash") != tests_hash:
+        fails.append(failure("gate:manifest", f"{name}: built against a different approved test suite; regenerate"))
+    changes = diff(m.get("files", {}), snapshot(d))
+    if any(changes.values()):
+        fails.append(failure("gate:manifest", f"{name}: generated files changed since generation (hand edits?): {changes}"))
+    return fails
