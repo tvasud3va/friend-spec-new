@@ -1,0 +1,9 @@
+{
+  "name": "message-friend-tools",
+  "private": true,
+  "description": "Build-time toolchain for generated clients (TypeScript compiler only). Not a runtime dependency.",
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/node": "20.17.6"
+  }
+}

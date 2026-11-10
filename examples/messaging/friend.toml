@@ -1,0 +1,48 @@
+# friend generator configuration (hand-written). Hashed into every run: changing it starts a new run.
+# Targets are NOT configured here: the planner derives them from spec/platforms/ into plan.json.
+
+[project]
+name = "message-friend"
+
+[layout]
+spec = "spec"                          # source of truth (approved with `friend approve spec`)
+generated = "clients"                  # every target is generated into clients/<target>/
+tests = "tests/generated"              # generated conformance suite (approved with `friend approve tests`)
+plan = "plan.json"                     # generated target plan (approved with `friend approve plan`)
+approvals = "approvals.json"
+holdout = ["tests/conformance"]        # hand-written suites never shown to any agent; always run by `friend verify`
+
+[agent]
+command = "claude"                     # Claude Code CLI, run headless (-p)
+model = "claude-opus-5-5"              # pinned; recorded in every manifest. Upgrade deliberately, then re-verify.
+effort = ""                            # CLI default
+max_budget_usd = 20.0                  # per agent invocation
+step_timeout_s = 2400                  # wall clock per agent invocation
+agent_retries = 1                      # relaunches after a crash (no result), per step
+
+[workflow]
+max_repairs = 3                        # builder repair rounds per target
+max_test_rounds = 3                    # tester fix rounds when the suite fails its gates
+max_disputes = 2                       # arbitrations per run
+auto_approve = false                   # `friend generate --auto-approve` overrides for unattended runs
+max_untestable_ratio = 0.25            # at most this share of MUST/SHOULD rules may be declared untestable
+audit_mutants = 4                      # mutants per target (0 disables the audit stage)
+audit_min_kill_rate = 0.75             # the suite must catch at least this share of valid mutants
+vacuity_timeout_s = 2.0
+
+# Tools targets may use. Shown to the planner; probed (and versions recorded) before every run.
+[toolchain.python]
+cmd = "python3"
+
+[toolchain.node]
+cmd = "node"
+
+[toolchain.tsc]
+cmd = "tools/node_modules/.bin/tsc"
+install = "cd tools && npm ci"
+
+# Hand-written components the generated targets work with. Tests start them with ctx.service(name).
+[services.server]
+launch = ["python3", "server/server.py", "--port", "0"]
+ready = "LISTENING (\\d+)"
+describe = "the message server from spec/core/protocol.md (hand-written). `ctx.service('server').port` is its TCP port on 127.0.0.1. Each test gets a fresh, empty server."
