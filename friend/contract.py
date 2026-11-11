@@ -115,5 +115,5 @@ def render(project: str, header: list[str], items: list[Check], proof: list[Chec
         out.append("")
     out += ["## Proof checks", ""]
     out += [f"- {MARK[c.status]} **{c.name}**: {c.detail}" for c in proof]
-    out += ["", "Legend: ✓ proven · ✗ failing · ? not proven by any test · - not applicable", ""]
+    out += ["", "Legend: ✓ proven · ✗ failing · ? not proven by any test · - not applicable or not run here", ""]
     return "\n".join(out)

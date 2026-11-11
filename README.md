@@ -42,8 +42,8 @@ run would cost on the API.
 ### 2. Install
 
 ```sh
-git clone https://github.com/tvasud3va/friend-spec.git
-cd friend-spec
+git clone https://github.com/tvasud3va/friend-spec-new.git
+cd friend-spec-new
 uv tool install .            # or: pipx install .   or: python3 -m pip install --user .
 friend --help                # confirms it installed
 ```
@@ -51,13 +51,13 @@ friend --help                # confirms it installed
 Inside any friend project (including the example below), `friend doctor` checks Claude Code, your login and
 toolchains.
 
-After the install, `friend` works from any folder. To update later, run `git pull` in `friend-spec`
+After the install, `friend` works from any folder. To update later, run `git pull` in `friend-spec-new`
 followed by `uv tool install --force --reinstall .`
 
 ### 3. Build something of your own
 
 ```sh
-cd ~                         # anywhere outside the friend-spec folder
+cd ~                         # anywhere outside the friend-spec-new folder
 friend                       # describe your idea; friend makes a folder for it, interviews you, then builds
 ```
 
@@ -79,7 +79,7 @@ The repo includes a finished messaging app: a small server plus Python and TypeS
 generated from `examples/messaging/spec/`. You can check it and use it without running any agents.
 
 ```sh
-cd friend-spec/examples/messaging
+cd friend-spec-new/examples/messaging
 (cd tools && npm ci)         # pinned TypeScript compiler
 friend doctor                # everything should show ✓
 friend verify                # builds both clients and runs every check (a few minutes, no API cost)
@@ -87,9 +87,9 @@ python3 demo.py              # watch Alice (Python) and Bob (TypeScript) go thro
 sh chat.sh                   # macOS: opens two Terminal windows to chat yourself (login Alice / login Bob)
 ```
 
-On a fresh copy, `friend verify` passes everything except the mutation audit line: that result is kept in
-local run records (`.friend/`, not in git) and only `friend generate` produces it. To rebuild the whole
-example from its spec yourself (about an hour):
+On a fresh copy, `friend verify` passes, with the mutation audit line marked "not run here": that result is
+kept in local run records (`.friend/`, not in git) and only `friend generate` produces it. To rebuild the
+whole example from its spec yourself (about an hour):
 
 ```sh
 friend clean --all && friend approve spec && friend generate --yes && friend verify

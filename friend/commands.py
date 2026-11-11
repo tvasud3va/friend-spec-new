@@ -357,8 +357,9 @@ def cmd_verify(args, cfg) -> int:
         add(Check("Mutation audit: tests catch deliberately broken code", "pass" if audit["kill_rate"] >= need else "fail",
                   f"kill rate {audit['kill_rate']:.0%} (needs {need:.0%}) in run {run.state['run_id']}"))
     else:
-        add(Check("Mutation audit: tests catch deliberately broken code", "unproven",
-                  "not measured for this spec; `friend generate` runs it"))
+        add(Check("Mutation audit: tests catch deliberately broken code", "skipped",
+                  "not run here: its results stay with the `friend generate` run that built the code (in .friend/, "
+                  "not in git); run `friend generate` to measure it on this machine"))
     import contract
     items, _ = contract.parse(cfg.root, cfg.spec_dir)
     return finish_verify(args, cfg, spec_hash, contract.judge_items(items, cases, untestable_map), proof, ev)
